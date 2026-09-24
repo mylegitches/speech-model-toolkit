@@ -1,0 +1,18 @@
+# Everything the app stores: training data, models, voices
+/data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.mypy_cache/
+
+# Editor / OS / local tooling
+.claude/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.log

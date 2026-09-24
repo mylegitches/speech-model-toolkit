@@ -1,0 +1,96 @@
+/* Landing page shell: tab bar, panels and the Home tab. Common styles
+   (colors, cards, buttons, banners) come from theme.css. */
+
+:root { --topbar-h: 56px; }
+
+html, body { height: 100%; }
+body {
+  padding: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---- Top bar ------------------------------------------------------------ */
+.topbar {
+  height: var(--topbar-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0 1.25rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.brand {
+  display: flex; align-items: center; gap: 0.6rem;
+  color: var(--text); text-decoration: none;
+  font-weight: 700; letter-spacing: -0.01em; white-space: nowrap;
+}
+.tabs { display: flex; gap: 0.25rem; height: 100%; }
+.tab {
+  display: flex; align-items: center; gap: 0.45rem;
+  padding: 0 0.9rem;
+  color: var(--muted); text-decoration: none; font-weight: 500;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent-text); }
+
+/* Status dot on a tab: pulses while that tool is busy */
+.dot { width: 7px; height: 7px; border-radius: 50%; }
+.dot.busy { background: var(--warning); animation: pulse 1.4s ease-in-out infinite; }
+
+/* ---- Panels ------------------------------------------------------------- */
+main { flex: 1; min-height: 0; position: relative; }
+.panel { position: absolute; inset: 0; display: none; }
+.panel.active { display: block; }
+.panel.frame iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+
+/* ---- Home --------------------------------------------------------------- */
+.home { overflow-y: auto; }
+.home-inner { max-width: 1040px; margin: 0 auto; padding: 3rem 1.25rem 4rem; display: flex; flex-direction: column; gap: 2rem; }
+
+.hero h1 { font-size: 2rem; line-height: 1.2; letter-spacing: -0.02em; font-weight: 700; }
+.hero p { color: var(--muted); margin-top: 0.6rem; max-width: 62ch; font-size: 1.05rem; }
+
+.tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; }
+.tool-head { display: flex; align-items: center; gap: 0.85rem; }
+.tool-head h2 { font-size: 1.15rem; line-height: 1.2; }
+.tool-sub { color: var(--muted); font-size: 0.85rem; }
+.tool-icon {
+  flex: none; width: 42px; height: 42px; border-radius: var(--radius);
+  display: grid; place-items: center;
+  color: var(--accent-text); background: var(--accent-soft);
+}
+
+.flow { list-style: none; display: flex; flex-wrap: wrap; gap: 0.3rem; font-size: 0.8rem; }
+.flow li { background: var(--surface-2); border-radius: 99px; padding: 0.15rem 0.55rem; color: var(--muted); }
+
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+.stats div { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.55rem 0.7rem; min-width: 0; }
+.stats dt { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.stats dd { font-weight: 600; font-size: 0.92rem; line-height: 1.35; overflow-wrap: break-word; }
+.ok   { color: var(--success); }
+.warn { color: var(--warning); }
+.bad  { color: var(--danger); }
+
+.lab-card .tool-foot { justify-content: flex-end; }
+.tool-foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; }
+.notes h3 { font-size: 0.95rem; margin-bottom: 0.3rem; }
+.notes p { color: var(--muted); font-size: 0.9rem; }
+
+@media (max-width: 640px) {
+  .topbar { gap: 0.5rem; padding: 0 0.5rem; }
+  .brand span { display: none; }
+  .tab { padding: 0 0.45rem; font-size: 0.85rem; }
+  .tabs { overflow-x: auto; }
+  .home-inner { padding: 1.75rem 1rem 3rem; }
+  .hero h1 { font-size: 1.6rem; }
+  .tools, .notes { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: 1fr; }
+}

@@ -1,0 +1,69 @@
+/* Voice trainer widgets. Common styles are in /static/theme.css. */
+
+.btn--record { background: #7f1d1d; border-color: var(--danger); }
+.btn--record.recording { background: var(--danger); animation: pulse 1s infinite; }
+
+.new-voice { display: flex; flex-direction: column; gap: 0.9rem; padding-top: 0.5rem; }
+
+/* Recording */
+.prompt-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  min-height: 7rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.prompt-box.recording { border-color: var(--danger); }
+.prompt-box.recorded { border-color: var(--success); }
+.prompt-text { font-size: 1.4rem; text-align: center; line-height: 1.5; }
+
+.readiness { display: flex; flex-direction: column; gap: 0.3rem; }
+.readiness-bar {
+  position: relative;
+  height: 10px;
+  background: var(--bg);
+  border-radius: 5px;
+  margin-bottom: 1rem;
+}
+#readiness-fill { height: 100%; width: 0; border-radius: 5px; background: var(--warning); transition: width 0.3s; }
+.readiness-bar .mark {
+  position: absolute;
+  top: 12px;
+  transform: translateX(-50%);
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.readiness-bar .mark:last-child { transform: translateX(-100%); }
+
+.upload[open], .advanced[open] { display: flex; flex-direction: column; gap: 0.8rem; }
+
+/* Training */
+.presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.6rem; }
+.preset {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.8rem;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.preset strong { display: block; }
+.preset span { color: var(--muted); font-size: 0.8rem; }
+.preset.selected { border-color: var(--accent-h); background: var(--accent-soft); }
+.preset:disabled { cursor: not-allowed; opacity: 0.6; }
+
+.timebar { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; margin-bottom: 0.8rem; }
+#timebar-fill { height: 100%; width: 0; background: var(--accent-h); transition: width 1s linear; }
+#timebar-fill.indeterminate { width: 30% !important; animation: slide 1.5s infinite ease-in-out; }
+@keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+
+/* Test & install */
+#speak-audio { width: 100%; }
+.howto { padding-left: 1.3rem; font-size: 0.9rem; color: var(--muted); display: flex; flex-direction: column; gap: 0.3rem; }
+.howto strong { color: var(--text); }
+.mic-row .btn { align-self: flex-end; }

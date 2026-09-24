@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings · Speech Model Toolkit</title>
+  <script>if (window.self !== window.top) document.documentElement.classList.add("embedded");</script>
+  <link rel="icon" href="../static/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../static/theme.css" />
+  <link rel="stylesheet" href="static/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Settings</h1>
+      <p class="subtitle">AI connections, speech recognition and audio for the Test Lab.</p>
+    </header>
+
+    <!-- AI connections -->
+    <section class="card">
+      <div class="card-head">
+        <h2>AI connections</h2>
+        <button id="add-conn-btn" class="btn btn--secondary">+ Add connection</button>
+      </div>
+      <p class="hint">Optional. With an active connection the Test Lab answers whatever you say after the wake word. Keys are stored on this machine in <code>data/settings.json</code> and never sent back to the browser.</p>
+
+      <div id="conn-list" class="conn-list"></div>
+
+      <form id="conn-form" class="conn-form hidden" autocomplete="off">
+        <h3 id="conn-form-title">New connection</h3>
+        <div class="grid">
+          <label>Provider
+            <select id="conn-provider"></select>
+          </label>
+          <label>Name
+            <input id="conn-name" placeholder="e.g. My OpenRouter" maxlength="60" />
+          </label>
+          <label class="wide">Base URL
+            <input id="conn-url" placeholder="https://…" spellcheck="false" />
+            <span id="provider-note" class="hint"></span>
+          </label>
+          <label class="wide" id="conn-key-label">API key
+            <div class="row">
+              <input id="conn-key" type="password" class="grow" spellcheck="false" autocomplete="new-password" />
+              <button type="button" id="toggle-key" class="btn btn--ghost">Show</button>
+            </div>
+            <span class="hint"><span id="key-hint"></span> <a id="key-link" target="_blank" rel="noopener"></a></span>
+          </label>
+          <label class="wide">Model
+            <div class="row">
+              <input id="conn-model" list="model-options" class="grow" placeholder="Load models, or type a model name" spellcheck="false" />
+              <button type="button" id="load-models-btn" class="btn btn--secondary">Load models</button>
+            </div>
+            <datalist id="model-options"></datalist>
+            <span id="model-count" class="hint"></span>
+          </label>
+        </div>
+        <div id="conn-result" class="banner hidden"></div>
+        <div class="row">
+          <button type="submit" class="btn btn--primary">Save</button>
+          <button type="button" id="test-conn-btn" class="btn btn--secondary">Test connection</button>
+          <button type="button" id="cancel-conn-btn" class="btn btn--ghost">Cancel</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Assistant -->
+    <section class="card" data-section="assistant">
+      <h2>Assistant</h2>
+      <div class="grid">
+        <label class="wide">Test Lab answers with
+          <select id="active-conn"></select>
+        </label>
+        <label class="wide">Reply when there is no AI connection
+          <input data-key="fixedReply" maxlength="300" />
+        </label>
+        <label class="wide">System prompt
+          <textarea data-key="systemPrompt" rows="3"></textarea>
+        </label>
+        <label>Temperature <span class="value" data-value="temperature"></span>
+          <input data-key="temperature" type="range" min="0" max="1.5" step="0.1" />
+        </label>
+        <label>Max reply tokens
+          <input data-key="maxTokens" type="number" min="16" max="4000" step="16" />
+        </label>
+      </div>
+    </section>
+
+    <!-- Speech recognition -->
+    <section class="card" data-section="speech">
+      <div class="card-head">
+        <h2>Speech recognition</h2>
+        <span id="stt-status" class="pill"></span>
+      </div>
+      <p class="hint">Turns your question into text after the wake word, on this machine (<a href="https://github.com/SYSTRAN/faster-whisper" target="_blank" rel="noopener">faster-whisper</a>). Only used with an AI connection.</p>
+      <div class="grid">
+        <label>Whisper model
+          <select data-key="sttModel" id="stt-model"></select>
+        </label>
+        <label>Language
+          <select data-key="language" id="stt-language"></select>
+        </label>
+        <label>Stop after silence (ms)
+          <input data-key="silenceMs" type="number" min="300" max="3000" step="100" />
+        </label>
+        <label>Longest question (seconds)
+          <input data-key="maxSeconds" type="number" min="3" max="60" step="1" />
+        </label>
+      </div>
+      <div class="row">
+        <button id="stt-download-btn" class="btn btn--secondary">Download model now</button>
+        <span class="hint">Otherwise it downloads the first time you ask a question.</span>
+      </div>
+    </section>
+
+    <!-- Audio -->
+    <section class="card" data-section="audio">
+      <h2>Audio</h2>
+      <p class="hint">Microphone, speaker and volume are remembered by this browser and used by every tab.</p>
+      <div class="grid">
+        <label class="wide">Microphone
+          <div class="row">
+            <select id="mic-select" class="grow"><option value="">Default microphone</option></select>
+            <button type="button" id="mic-test-btn" class="btn btn--secondary">🎤 Test</button>
+          </div>
+        </label>
+        <div class="vu wide"><div id="vu-bar" class="vu-bar"></div></div>
+        <label class="wide">Speaker
+          <div class="row">
+            <select id="speaker-select" class="grow"><option value="">Default speaker</option></select>
+            <button type="button" id="speaker-test-btn" class="btn btn--secondary">🔊 Test</button>
+          </div>
+          <span id="speaker-note" class="hint hidden">This browser can't choose a speaker; it uses the system default.</span>
+        </label>
+        <label>Volume <span class="value" id="volume-value"></span>
+          <input id="volume" type="range" min="0" max="1" step="0.05" />
+        </label>
+        <label>Wake word sensitivity <span class="value" data-value="threshold"></span>
+          <input data-key="threshold" type="range" min="0.1" max="0.95" step="0.05" />
+          <span class="hint">Detection threshold: lower triggers more easily.</span>
+        </label>
+        <label>Pause after each reply (seconds)
+          <input data-key="cooldownSec" type="number" min="0" max="10" step="0.5" />
+        </label>
+        <div class="switches wide">
+          <label class="switch"><input type="checkbox" data-key="echoCancellation" /><span>Echo cancellation</span></label>
+          <label class="switch"><input type="checkbox" data-key="noiseSuppression" /><span>Noise suppression</span></label>
+          <label class="switch"><input type="checkbox" data-key="autoGainControl" /><span>Automatic gain</span></label>
+          <label class="switch"><input type="checkbox" data-key="allowDownloads" /><span>Allow downloading generated .wav files</span></label>
+        </div>
+      </div>
+      <p class="hint">Echo cancellation, noise suppression and gain apply to wake word listening. Voice recordings for training always use the raw microphone.</p>
+    </section>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="../static/audio-prefs.js"></script>
+  <script src="static/app.js"></script>
+</body>
+</html>

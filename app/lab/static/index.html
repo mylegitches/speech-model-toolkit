@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Test Lab · Speech Model Toolkit</title>
+  <script>if (window.self !== window.top) document.documentElement.classList.add("embedded");</script>
+  <link rel="icon" href="../static/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../static/theme.css" />
+  <link rel="stylesheet" href="static/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Test Lab</h1>
+      <p class="subtitle">Say your wake word and hear your voice answer.</p>
+    </header>
+
+    <!-- 1. Setup -->
+    <section class="card">
+      <h2><span class="step">1</span> Setup</h2>
+      <div class="grid">
+        <label>Wake word
+          <select id="wakeword-select"></select>
+        </label>
+        <label>Reply voice
+          <select id="voice-select"></select>
+        </label>
+      </div>
+      <div id="no-wakeword" class="banner banner--warning hidden">
+        No wake word trained yet. Train one in the <a href="../#wakeword" target="_top">Wake Word</a> tab first.
+      </div>
+      <div class="mode">
+        <span id="mode-pill" class="pill"></span>
+        <span id="mode-text" class="hint"></span>
+        <a href="../#settings" target="_top" class="hint">Change in Settings</a>
+      </div>
+    </section>
+
+    <!-- 2. Listen -->
+    <section class="card">
+      <h2><span class="step">2</span> Listen</h2>
+      <div class="row">
+        <button id="start-btn" class="btn btn--primary btn--big" disabled>🎤 Start listening</button>
+        <span id="state-pill" class="pill">Stopped</span>
+      </div>
+      <p id="state-detail" class="hint">Pick a wake word, click Start listening, then say it.</p>
+
+      <div class="vu-row">
+        <span class="vu-label">Input</span>
+        <div class="vu grow"><div id="vu-bar" class="vu-bar"></div></div>
+        <span id="vu-val" class="vu-val">—</span>
+      </div>
+
+      <div class="detector">
+        <div id="detector-ring" class="detector-ring"></div>
+        <div id="detector-label" class="detector-label">—</div>
+        <div class="score-bar-wrap"><div id="score-bar" class="score-bar"></div></div>
+        <div id="score-val" class="score-val"></div>
+      </div>
+    </section>
+
+    <!-- 3. Conversation -->
+    <section class="card">
+      <div class="card-head">
+        <h2><span class="step">3</span> Conversation</h2>
+        <button id="reset-btn" class="btn btn--ghost">New conversation</button>
+      </div>
+      <div id="log" class="log">
+        <p class="hint log-empty">Replies appear here. You can also type a question below.</p>
+      </div>
+      <form id="ask-form" class="row">
+        <input id="ask-input" class="grow" maxlength="2000" placeholder="Type a question instead of speaking" autocomplete="off" />
+        <button type="submit" class="btn btn--secondary">Send</button>
+      </form>
+      <audio id="player" class="hidden"></audio>
+    </section>
+  </div>
+
+  <script src="../static/audio-prefs.js"></script>
+  <script src="static/app.js"></script>
+</body>
+</html>

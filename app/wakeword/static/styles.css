@@ -1,0 +1,41 @@
+/* Wake word trainer widgets. Common styles are in /static/theme.css. */
+
+/* First-run data download */
+.prepare-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.prepare-header .hint { margin-top: 0.25rem; }
+
+.missing-list {
+  list-style: none;
+  font-size: 0.82rem;
+  color: #fde68a;
+  font-family: var(--mono);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.missing-list:empty { display: none; }
+.missing-list li::before { content: "✗  "; color: var(--warning); }
+
+/* Result / failure banners inside the Train card */
+.banner.done, #error-section { display: flex; flex-direction: column; gap: 0.75rem; }
+.error-msg {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  background: #07080c;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* Tester */
+#mic-btn.listening { background: var(--danger); animation: pulse 1s infinite; }

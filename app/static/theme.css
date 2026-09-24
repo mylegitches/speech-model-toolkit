@@ -1,0 +1,252 @@
+/*
+ * Shared look for the whole toolkit: the landing page and both tool UIs
+ * (/wakeword/, /voice/) load this first. Tool stylesheets only add widgets
+ * specific to that tool, so change common things (colors, cards, buttons,
+ * inputs, progress, logs) here.
+ */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0f1117;
+  --surface:   #1a1d27;
+  --surface-2: #232736;
+  --border:    #2c2f3e;
+  --accent:      #095b1b;               /* fills with white text (buttons, badges) */
+  --accent-h:    #0c7424;               /* hover, focus rings, progress fills */
+  --accent-text: #4cc26a;               /* same hue, light enough for text on dark */
+  --accent-soft: rgba(9, 91, 27, 0.3);
+  --success:   #22c55e;
+  --warning:   #f59e0b;
+  --danger:    #ef4444;
+  --text:      #e2e8f0;
+  --muted:     #8492a6;
+  --mono:      "JetBrains Mono", "Fira Code", "Consolas", monospace;
+  --radius:    10px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  min-height: 100vh;
+  padding: 2rem 1rem 4rem;
+}
+
+a { color: var(--accent-text); }
+code, kbd { font-family: var(--mono); font-size: 0.85em; }
+code { background: var(--surface-2); padding: 0.05em 0.35em; border-radius: 4px; }
+kbd {
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 0 0.3em;
+  margin-left: 0.3em;
+  opacity: 0.6;
+}
+
+.hidden { display: none !important; }
+
+/* ---- Page layout -------------------------------------------------------- */
+.container {
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.container > header { text-align: center; padding: 1rem 0 0.5rem; }
+.container > header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
+.subtitle { color: var(--muted); margin-top: 0.4rem; }
+.container > footer { text-align: center; }
+
+/* Inside the toolkit's tabs the tab bar already names the tool */
+html.embedded body { padding-top: 1.5rem; }
+html.embedded .container > header { display: none; }
+
+/* ---- Cards -------------------------------------------------------------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.card h2 { font-size: 1.15rem; display: flex; align-items: center; gap: 0.6rem; }
+.card--warning { border-color: var(--warning); }
+.card--success { border-color: var(--success); }
+.card--error   { border-color: var(--danger); }
+
+/* Numbered step badge in card titles */
+.step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 50%;
+  background: var(--accent);
+  font-size: 0.9rem;
+}
+
+/* ---- Banners ------------------------------------------------------------ */
+.banner { border-radius: var(--radius); padding: 1rem 1.25rem; font-size: 0.9rem; }
+.banner--warning { background: rgba(245, 158, 11, 0.12); border: 1px solid var(--warning); color: #fde68a; }
+.banner--error   { background: rgba(239, 68, 68, 0.12); border: 1px solid var(--danger); color: #fecaca; white-space: pre-wrap; }
+.banner--success { background: rgba(34, 197, 94, 0.12); border: 1px solid var(--success); color: #bbf7d0; }
+
+.hint { color: var(--muted); font-size: 0.85rem; }
+
+/* ---- Form layout -------------------------------------------------------- */
+.row { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+.grow { flex: 1; min-width: 12rem; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.9rem;
+}
+.grid .wide { grid-column: 1 / -1; }
+label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; color: var(--muted); }
+
+input, select, textarea {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font: inherit;
+  min-width: 0;
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-h); }
+input:disabled, select:disabled, textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+textarea { resize: vertical; min-height: 5rem; line-height: 1.5; }
+input[type=range] { padding: 0; accent-color: var(--accent-h); }
+
+/* On/off switch: <label class="switch"><input type="checkbox"><span>Text</span></label> */
+.switch { flex-direction: row; align-items: center; gap: 0.65rem; color: var(--text); cursor: pointer; }
+.switch input { appearance: none; width: 2.4rem; height: 1.35rem; padding: 0; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--border); position: relative; cursor: pointer; flex: none; transition: background 0.15s; }
+.switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: calc(1.35rem - 6px); height: calc(1.35rem - 6px); border-radius: 50%; background: var(--muted); transition: transform 0.15s, background 0.15s; }
+.switch input:checked { background: var(--accent); border-color: var(--accent-h); }
+.switch input:checked::after { transform: translateX(1.05rem); background: #fff; }
+input[type=file] { padding: 0.45rem; }
+.input--big { font-size: 1.15rem; padding: 0.7rem 1rem; }
+
+details summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
+
+/* ---- Buttons ------------------------------------------------------------ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.6rem 1.1rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  color: var(--text);
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn--primary { background: var(--accent); color: #fff; }
+.btn--primary:hover:not(:disabled) { background: var(--accent-h); }
+.btn--secondary { background: var(--surface-2); border-color: var(--border); }
+.btn--secondary:hover:not(:disabled) { border-color: var(--accent-h); }
+.btn--ghost { background: transparent; color: var(--muted); }
+.btn--ghost:hover:not(:disabled) { color: var(--text); }
+.btn--danger { background: var(--danger); color: #fff; }
+.btn--download { background: var(--success); color: #06200f; }
+.btn--download:hover:not(:disabled) { opacity: 0.85; }
+.btn--big { font-size: 1.1rem; padding: 0.8rem 2.2rem; }
+.btn.loading { opacity: 0.6; cursor: wait; }
+
+@keyframes pulse { 50% { opacity: 0.7; } }
+
+/* ---- Progress ----------------------------------------------------------- */
+.progress-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.6rem; }
+.progress-label { font-weight: 600; }
+.stages { display: flex; gap: 0.3rem; align-items: center; font-size: 0.8rem; flex-wrap: wrap; }
+.stage { padding: 0.15rem 0.55rem; border-radius: 99px; background: var(--surface-2); color: var(--muted); transition: background 0.2s, color 0.2s; }
+.stage.active { background: var(--accent); color: #fff; }
+.stage.done { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+.stage-sep { color: var(--muted); }
+
+.log-panel {
+  margin-top: 0.6rem;
+  background: #07080c;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  height: 20rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #a8b3c7;
+}
+
+/* ---- Microphone level meter --------------------------------------------- */
+.vu { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+.vu-bar { height: 100%; width: 0; background: var(--success); border-radius: 3px; transition: width 0.05s; }
+.vu-bar.hot  { background: var(--warning); }
+.vu-bar.clip { background: var(--danger); }
+
+/* Level meter with label + value, and the wake word detector ring */
+.vu-row { display: flex; align-items: center; gap: 0.6rem; }
+.vu-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  width: 2.5rem;
+}
+.vu-val {
+  font-size: 0.72rem;
+  font-family: var(--mono);
+  color: var(--muted);
+  width: 2.5rem;
+  text-align: right;
+}
+
+.detector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 0 0.25rem;
+}
+.detector-ring {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  background: var(--bg);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.detector-ring.active {
+  border-color: var(--success);
+  background: rgba(34, 197, 94, 0.15);
+  box-shadow: 0 0 24px rgba(34, 197, 94, 0.5);
+}
+.detector-label { font-size: 0.85rem; color: var(--muted); min-height: 1.2em; }
+
+.score-bar-wrap { width: 200px; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+.score-bar { height: 100%; width: 0%; background: var(--muted); border-radius: 3px; transition: width 0.1s, background 0.1s; }
+.score-bar.hot { background: var(--success); }
+.score-val { font-size: 0.75rem; color: var(--muted); font-family: var(--mono); min-height: 1em; }
+
+/* ---- Status pill -------------------------------------------------------- */
+.pill { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.15rem 0.65rem; border-radius: 99px; background: var(--surface-2); color: var(--muted); font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
+.pill--ok     { background: var(--accent-soft); color: var(--accent-text); }
+.pill--warn   { background: rgba(245, 158, 11, 0.14); color: #fcd34d; }
+.pill--bad    { background: rgba(239, 68, 68, 0.14); color: #fca5a5; }
+.pill--live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.2s infinite; }

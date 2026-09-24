@@ -1,0 +1,7 @@
+*
+!app/
+!export_dataset/
+!prompts/
+!scripts/
+!requirements.txt
+**/__pycache__

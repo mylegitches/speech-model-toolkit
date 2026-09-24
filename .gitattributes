@@ -1,0 +1,4 @@
+# Keep LF everywhere: shell scripts run inside the Linux image and break with CRLF
+* text=auto eol=lf
+*.onnx binary
+*.png binary

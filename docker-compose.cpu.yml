@@ -1,0 +1,15 @@
+# CPU only: wake word training works fine (~10 min per model); voice
+# recording and testing work, but voice training is very slow.
+services:
+  toolkit:
+    build: .
+    image: speech-model-toolkit
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/data
+    extra_hosts:
+      # Lets the AI settings reach Ollama / LM Studio running on this machine
+      - "host.docker.internal:host-gateway"
+    shm_size: 4gb
+    restart: unless-stopped

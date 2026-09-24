@@ -1,0 +1,17 @@
+/* Test Lab widgets. Common styles (incl. detector ring and meter) are in /static/theme.css. */
+
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.mode { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+
+#start-btn.listening { background: var(--danger); }
+
+/* Conversation */
+.log { display: flex; flex-direction: column; gap: 0.6rem; max-height: 28rem; overflow-y: auto; }
+.msg { max-width: 85%; padding: 0.6rem 0.85rem; border-radius: 12px; display: flex; flex-direction: column; gap: 0.4rem; }
+.msg--you { align-self: flex-end; background: var(--surface-2); border-bottom-right-radius: 4px; }
+.msg--bot { align-self: flex-start; background: var(--accent-soft); border: 1px solid var(--accent); border-bottom-left-radius: 4px; }
+.msg--note { align-self: center; max-width: 100%; color: var(--muted); font-size: 0.82rem; padding: 0.1rem 0; }
+.msg--error { align-self: stretch; max-width: 100%; background: rgba(239, 68, 68, 0.12); border: 1px solid var(--danger); color: #fecaca; font-size: 0.85rem; }
+.msg-who { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.msg-actions { display: flex; gap: 0.4rem; }
+.msg-actions .btn { padding: 0.25rem 0.65rem; font-size: 0.8rem; }

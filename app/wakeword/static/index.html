@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wake Word · Speech Model Toolkit</title>
+  <script>if (window.self !== window.top) document.documentElement.classList.add("embedded");</script>
+  <link rel="icon" href="../static/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../static/theme.css" />
+  <link rel="stylesheet" href="static/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Wake Word Trainer</h1>
+      <p class="subtitle">Type a wake phrase and train your own openWakeWord model — no coding required.</p>
+    </header>
+
+    <!-- Data health / download section (shown when assets are missing or downloading) -->
+    <section id="prepare-section" class="card card--warning hidden">
+      <div class="prepare-header">
+        <div>
+          <h2 id="prepare-title">Training data not ready</h2>
+          <p id="prepare-subtitle" class="hint">
+            The first run requires downloading ~5–20 GB of training assets.
+          </p>
+        </div>
+        <button id="prepare-btn" class="btn btn--primary">Download Data</button>
+      </div>
+
+      <!-- Missing asset list (shown before download starts) -->
+      <ul id="missing-list" class="missing-list"></ul>
+
+      <!-- Progress log (shown while downloading) -->
+      <pre id="prepare-log" class="log-panel hidden"></pre>
+    </section>
+
+    <!-- 1. Phrase -->
+    <section class="card">
+      <h2><span class="step">1</span> Wake phrase</h2>
+      <div class="row">
+        <input
+          id="phrase-input"
+          type="text"
+          class="grow input--big"
+          placeholder="e.g. hey computer"
+          maxlength="80"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button id="preview-btn" class="btn btn--secondary" disabled title="Hear how Piper will pronounce this phrase">🔊 Preview</button>
+      </div>
+      <p class="hint">Letters, numbers, and spaces only · max 6 words · Preview plays one of the synthetic voices used for training</p>
+      <audio id="preview-audio" class="hidden"></audio>
+    </section>
+
+    <!-- 2. Train -->
+    <section class="card">
+      <h2><span class="step">2</span> Train</h2>
+      <p class="hint">Generates 1,000 spoken samples of your phrase, mixes in background noise and room echo, then trains the detector. About 7–10 minutes.</p>
+
+      <div class="row">
+        <button id="train-btn" class="btn btn--primary btn--big" disabled>Train</button>
+      </div>
+
+      <div id="progress-section" class="hidden">
+        <div class="progress-header">
+          <span id="progress-label" class="progress-label">Starting…</span>
+          <div class="stages">
+            <span id="stage-generate" class="stage">Generate</span><span class="stage-sep">›</span>
+            <span id="stage-augment"  class="stage">Augment</span><span class="stage-sep">›</span>
+            <span id="stage-train"    class="stage">Train</span><span class="stage-sep">›</span>
+            <span id="stage-export"   class="stage">Export</span>
+          </div>
+        </div>
+        <details class="log-details" open>
+          <summary>Log</summary>
+          <pre id="log-panel" class="log-panel"></pre>
+        </details>
+      </div>
+
+      <div id="download-section" class="banner banner--success done hidden">
+        <strong>✓ Model ready: <span id="model-name-out"></span></strong>
+        <div class="row">
+          <a id="dl-zip"    class="btn btn--download" download>Download .zip (ONNX + TFLite)</a>
+          <a id="dl-onnx"   class="btn btn--secondary" download>.onnx</a>
+          <a id="dl-tflite" class="btn btn--secondary" download>.tflite</a>
+        </div>
+      </div>
+
+      <div id="error-section" class="banner banner--error hidden">
+        <strong>Training failed</strong>
+        <pre id="error-msg" class="error-msg"></pre>
+      </div>
+    </section>
+
+    <!-- 3. Test -->
+    <section class="card">
+      <h2><span class="step">3</span> Test</h2>
+      <p class="hint">Pick a trained model and say the phrase into your microphone. The ring lights up on detection.</p>
+
+      <div class="grid">
+        <label>Model
+          <select id="model-select">
+            <option value="">— select a model —</option>
+          </select>
+        </label>
+        <label>Microphone
+          <select id="mic-select">
+            <option value="">Default microphone</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <button id="mic-btn" class="btn btn--primary" disabled>🎤 Start Listening</button>
+        <span id="mic-active-label" class="hint" style="display:none"></span>
+      </div>
+
+      <!-- Live input level (VU meter) -->
+      <div class="vu-row" id="vu-row" style="display:none">
+        <span class="vu-label">Input</span>
+        <div class="vu grow"><div id="vu-bar" class="vu-bar"></div></div>
+        <span id="vu-val" class="vu-val">—</span>
+      </div>
+
+      <!-- Detection indicator -->
+      <div id="detector" class="detector">
+        <div id="detector-ring" class="detector-ring"></div>
+        <div id="detector-label" class="detector-label">—</div>
+        <div id="score-bar-wrap" class="score-bar-wrap">
+          <div id="score-bar" class="score-bar"></div>
+        </div>
+        <div id="score-val" class="score-val"></div>
+      </div>
+    </section>
+
+    <footer class="hint">
+      Training by <a href="https://github.com/dscripka/openWakeWord">openWakeWord</a> ·
+      samples from <a href="https://github.com/rhasspy/piper-sample-generator">piper-sample-generator</a> ·
+      TFLite export by <a href="https://github.com/PINTO0309/onnx2tf">onnx2tf</a>
+    </footer>
+  </div>
+
+  <script src="../static/audio-prefs.js"></script>
+  <script src="static/app.js"></script>
+</body>
+</html>

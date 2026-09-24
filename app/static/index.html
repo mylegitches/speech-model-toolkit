@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Speech Model Toolkit</title>
+  <link rel="icon" href="static/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="static/theme.css" />
+  <link rel="stylesheet" href="static/shell.css" />
+</head>
+<body>
+  <nav class="topbar">
+    <a class="brand" href="#home" data-tab="home">
+      <img src="static/icon.svg" alt="" width="26" height="26" />
+      <span>Speech Model Toolkit</span>
+    </a>
+    <div class="tabs" role="tablist">
+      <a class="tab" href="#home" data-tab="home" role="tab">Home</a>
+      <a class="tab" href="#wakeword" data-tab="wakeword" role="tab">
+        Wake Word <span class="dot" id="dot-wakeword"></span>
+      </a>
+      <a class="tab" href="#voice" data-tab="voice" role="tab">
+        Voice <span class="dot" id="dot-voice"></span>
+      </a>
+      <a class="tab" href="#lab" data-tab="lab" role="tab">Test Lab</a>
+      <a class="tab" href="#settings" data-tab="settings" role="tab">Settings</a>
+    </div>
+  </nav>
+
+  <main>
+    <!-- Home -->
+    <section class="panel home" id="panel-home">
+      <div class="home-inner">
+        <div class="hero">
+          <h1>Train your own speech models, locally.</h1>
+          <p>Make a custom wake word, or clone your own voice for text-to-speech.
+             Everything runs on this machine, and the results drop straight into Home Assistant.</p>
+        </div>
+
+        <div id="gpu-warning" class="banner banner--warning hidden">
+          Both trainers are running at once and share the GPU. If either one fails with an out-of-memory error, stop one and try again.
+        </div>
+
+        <div class="tools">
+          <article class="card tool">
+            <div class="tool-head">
+              <span class="tool-icon">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+              </span>
+              <div>
+                <h2>Wake Word</h2>
+                <p class="tool-sub">openWakeWord · ONNX + TFLite</p>
+              </div>
+            </div>
+            <p>Type a phrase like <em>“hey computer”</em>. Piper generates thousands of
+               synthetic clips, openWakeWord trains a small detector, and you can test it
+               live with your microphone.</p>
+            <ol class="flow">
+              <li>Phrase</li><li>Synthesize</li><li>Augment</li><li>Train</li><li>Test</li>
+            </ol>
+            <dl class="stats">
+              <div><dt>Training data</dt><dd id="ww-data">…</dd></div>
+              <div><dt>Trained models</dt><dd id="ww-models">…</dd></div>
+              <div><dt>Now</dt><dd id="ww-now">…</dd></div>
+            </dl>
+            <div class="tool-foot">
+              <span class="hint">~7–10 min per model · CPU is fine</span>
+              <a class="btn btn--primary" href="#wakeword">Open wake word trainer →</a>
+            </div>
+          </article>
+
+          <article class="card tool">
+            <div class="tool-head">
+              <span class="tool-icon">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>
+              </span>
+              <div>
+                <h2>Voice</h2>
+                <p class="tool-sub">Piper TTS · .onnx + .onnx.json</p>
+              </div>
+            </div>
+            <p>Read sentences into your microphone (or upload a dataset). Piper fine-tunes a
+               pretrained voice on your recordings, then you can listen to it and download it for Home Assistant.</p>
+            <ol class="flow">
+              <li>Record</li><li>Train</li><li>Listen</li><li>Download</li>
+            </ol>
+            <dl class="stats">
+              <div><dt>Training device</dt><dd id="v-device">…</dd></div>
+              <div><dt>Voices</dt><dd id="v-voices">…</dd></div>
+              <div><dt>Now</dt><dd id="v-now">…</dd></div>
+            </dl>
+            <div class="tool-foot">
+              <span class="hint">30 min – 8 h · NVIDIA GPU recommended</span>
+              <a class="btn btn--primary" href="#voice">Open voice trainer →</a>
+            </div>
+          </article>
+        </div>
+
+        <article class="card tool lab-card">
+          <div class="tool-head">
+            <span class="tool-icon">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6"/><path d="M10 3v6.5L4.5 19a1.5 1.5 0 0 0 1.3 2.2h12.4a1.5 1.5 0 0 0 1.3-2.2L14 9.5V3"/><path d="M7.5 15h9"/></svg>
+            </span>
+            <div>
+              <h2>Test Lab</h2>
+              <p class="tool-sub">Wake word + voice, together</p>
+            </div>
+          </div>
+          <p>Say your wake word and hear your own voice answer. Add an AI connection in
+             Settings and it answers whatever you ask after the wake word; without one it
+             confirms that everything was trained and triggered.</p>
+          <dl class="stats">
+            <div><dt>Status</dt><dd id="lab-ready">…</dd></div>
+            <div><dt>Replies</dt><dd id="lab-mode">…</dd></div>
+            <div><dt>AI</dt><dd id="lab-ai">…</dd></div>
+          </dl>
+          <div class="tool-foot">
+            <a class="btn btn--secondary" href="#settings">Settings</a>
+            <a class="btn btn--primary" href="#lab">Open Test Lab →</a>
+          </div>
+        </article>
+
+        <section class="notes">
+          <div>
+            <h3>Microphone access</h3>
+            <p>Browsers only allow the microphone on <code>localhost</code> or HTTPS. From another
+               machine, tunnel with <code>ssh -L 8765:localhost:8765 &lt;server&gt;</code>, or add this address to
+               <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>.</p>
+          </div>
+          <div>
+            <h3>Where things are stored</h3>
+            <p>Everything lives in <code>./data</code> next to <code>docker-compose.yml</code>:
+               <code>wakeword/</code> (training assets), <code>wakeword-models/</code> (your wake words),
+               and <code>voice/</code> (recordings, training runs, exported voices).</p>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- Tools: iframes are created on first visit and kept alive, so training
+         logs keep streaming while you look at the other tab. -->
+    <section class="panel frame" id="panel-wakeword" data-src="wakeword/"></section>
+    <section class="panel frame" id="panel-voice" data-src="voice/"></section>
+    <section class="panel frame" id="panel-lab" data-src="lab/"></section>
+    <section class="panel frame" id="panel-settings" data-src="settings/"></section>
+  </main>
+
+  <script src="static/shell.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+# NVIDIA GPU (recommended). Needs the NVIDIA Container Toolkit.
+# No GPU? Use: docker compose -f docker-compose.cpu.yml up --build
+services:
+  toolkit:
+    build: .
+    image: speech-model-toolkit
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/data
+    extra_hosts:
+      # Lets the AI settings reach Ollama / LM Studio running on this machine
+      - "host.docker.internal:host-gateway"
+    shm_size: 4gb  # PyTorch data loaders need more than Docker's 64 MB default
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

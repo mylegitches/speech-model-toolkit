@@ -1,0 +1,31 @@
+/* Settings widgets. Common styles are in /static/theme.css. */
+
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.value { color: var(--text); font-weight: 600; }
+.wide { grid-column: 1 / -1; }
+.switches { display: flex; flex-direction: column; gap: 0.6rem; }
+
+/* Saved connections */
+.conn-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.conn-list:empty { display: none; }
+.conn {
+  display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.7rem 0.9rem;
+}
+.conn.active { border-color: var(--accent-h); }
+.conn-main { flex: 1; min-width: 12rem; }
+.conn-main strong { display: block; }
+.conn-main span { color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
+
+.conn-form {
+  display: flex; flex-direction: column; gap: 0.9rem;
+  border-top: 1px solid var(--border); padding-top: 1rem;
+}
+.conn-form h3 { font-size: 1rem; }
+
+.toast {
+  position: fixed; bottom: 1.25rem; left: 50%; transform: translateX(-50%);
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 99px;
+  padding: 0.4rem 1rem; font-size: 0.85rem; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+}

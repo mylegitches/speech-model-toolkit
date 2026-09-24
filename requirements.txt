@@ -1,0 +1,39 @@
+# Web app + wake word training (system Python in the image).
+# Piper voice training is installed separately by scripts/install_piper.
+
+# Web framework
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+
+# Wake word training (mirrors openWakeWord's automated training notebook)
+torch==2.2.2
+torchaudio==2.2.2
+torchvision==0.17.2
+numpy==1.26.4
+scipy==1.13.0
+piper-phonemize==1.1.0
+webrtcvad==2.0.10
+mutagen==1.47.0
+torchinfo==1.8.0
+torchmetrics==1.2.0
+speechbrain==0.5.14
+audiomentations==0.33.0
+torch-audiomentations==0.11.0
+acoustics==0.2.6
+pronouncing==0.2.0
+datasets==2.14.6
+deep-phonemizer==0.0.19
+onnx==1.16.0
+pyyaml==6.0.1
+
+# Audio decoding for the training data download
+soundfile
+librosa
+
+# Wake word tester + voice dataset export (Silero VAD)
+onnxruntime==1.18.0
+
+# Test Lab: AI provider calls and local speech-to-text
+httpx>=0.27,<1
+faster-whisper==1.0.3
