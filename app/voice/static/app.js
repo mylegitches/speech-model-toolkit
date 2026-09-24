@@ -233,6 +233,7 @@ async function openMicrophone() {
   });
   micLabel = mediaStream.getAudioTracks()[0].label || '';
   const context = new AudioContext();
+  context.resume().catch(() => {});  // phones may create it suspended (level meter only)
   analyser = context.createAnalyser();
   analyser.fftSize = 1024;
   context.createMediaStreamSource(mediaStream).connect(analyser);
@@ -656,6 +657,7 @@ $('#export-btn').addEventListener('click', async () => {
 });
 
 $('#speak-btn').addEventListener('click', async () => {
+  SMT.unlockAudio($('#speak-audio'));  // phones: allow playing once the audio arrives
   const button = $('#speak-btn');
   button.disabled = true;
   button.textContent = 'Speaking…';

@@ -78,5 +78,48 @@
     }
   }
 
-  window.SMT = { get, set, serverSettings, openMic, applyOutput, applyDownloads };
+  // ---- Mobile helpers ------------------------------------------------------
+
+  const SILENCE = 'data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YRAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+  /**
+   * Phones (iOS Safari especially) only let an <audio> element play sound that
+   * starts from a tap. Call this synchronously inside the click handler; the
+   * element can then play later, e.g. when a reply arrives.
+   */
+  function unlockAudio(audioEl) {
+    if (!audioEl || audioEl.dataset.unlocked) return;
+    audioEl.dataset.unlocked = '1';
+    const src = audioEl.getAttribute('src');
+    audioEl.src = SILENCE;
+    const done = () => {
+      if (audioEl.src !== SILENCE) return;  // real audio was set meanwhile
+      if (src) audioEl.src = src;
+      else audioEl.removeAttribute('src');
+    };
+    audioEl.play().then(() => { audioEl.pause(); done(); }).catch(done);
+  }
+
+  /** Keep the screen on while listening (the phone would otherwise sleep and cut the mic). */
+  let wakeLock = null;
+  let wantAwake = false;
+  async function keepAwake(on) {
+    wantAwake = on;
+    if (!('wakeLock' in navigator)) return;
+    try {
+      if (on && !wakeLock) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      } else if (!on && wakeLock) {
+        await wakeLock.release();
+        wakeLock = null;
+      }
+    } catch (e) { /* not allowed right now (e.g. page hidden) */ }
+  }
+  // The lock is dropped when the page is hidden; take it again on return
+  document.addEventListener('visibilitychange', () => {
+    if (wantAwake && document.visibilityState === 'visible') keepAwake(true);
+  });
+
+  window.SMT = { get, set, serverSettings, openMic, applyOutput, applyDownloads, unlockAudio, keepAwake };
 })();

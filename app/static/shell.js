@@ -19,7 +19,7 @@ function showTab(name) {
         const frame = document.createElement('iframe');
         frame.src = panel.dataset.src;
         frame.title = tab;
-        frame.allow = 'microphone; autoplay; clipboard-write; speaker-selection';
+        frame.allow = 'microphone; autoplay; clipboard-write; speaker-selection; screen-wake-lock';
         panel.appendChild(frame);
       }
     }
@@ -87,3 +87,49 @@ async function refreshStatus() {
 
 refreshStatus();
 setInterval(refreshStatus, 5000);
+
+// ---- Add to Home Screen ------------------------------------------------------------
+
+(function installHint() {
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  const phone = window.matchMedia('(max-width: 640px), (pointer: coarse)').matches;
+  let dismissed = false;
+  try { dismissed = localStorage.getItem('smt.installDismissed') === '1'; } catch (e) { /* ignore */ }
+  if (standalone || dismissed) return;
+
+  const card = document.getElementById('install-card');
+  const text = document.getElementById('install-text');
+  const button = document.getElementById('install-btn');
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  if (phone) {
+    text.textContent = ios
+      ? 'In Safari, tap Share, then “Add to Home Screen” for a full-screen app.'
+      : 'In your browser menu, choose “Add to Home screen” or “Install app”.';
+    card.classList.remove('hidden');
+  }
+
+  // Chrome / Edge / Android: offer a one-tap install
+  let prompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    prompt = e;
+    text.textContent = 'Add it to your home screen: it opens full screen, without the browser bar.';
+    button.classList.remove('hidden');
+    card.classList.remove('hidden');
+  });
+  button.addEventListener('click', async () => {
+    if (!prompt) return;
+    prompt.prompt();
+    await prompt.userChoice;
+    prompt = null;
+    card.classList.add('hidden');
+  });
+  window.addEventListener('appinstalled', () => card.classList.add('hidden'));
+
+  document.getElementById('install-dismiss').addEventListener('click', () => {
+    card.classList.add('hidden');
+    try { localStorage.setItem('smt.installDismissed', '1'); } catch (e) { /* ignore */ }
+  });
+})();

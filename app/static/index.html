@@ -2,8 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Speech Model Toolkit</title>
+  <meta name="description" content="Train wake words and Piper voices, and try them together." />
+  <meta name="theme-color" content="#1a1d27" />
+  <!-- Add to Home Screen: runs full screen like an app -->
+  <link rel="manifest" href="static/manifest.webmanifest" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Speech Toolkit" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="apple-touch-icon" href="static/icons/apple-touch-icon.png" />
   <link rel="icon" href="static/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="static/theme.css" />
   <link rel="stylesheet" href="static/shell.css" />
@@ -15,15 +24,26 @@
       <span>Speech Model Toolkit</span>
     </a>
     <div class="tabs" role="tablist">
-      <a class="tab" href="#home" data-tab="home" role="tab">Home</a>
+      <a class="tab" href="#home" data-tab="home" role="tab">
+        <svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"/></svg>
+        <span class="tab-label">Home</span>
+      </a>
       <a class="tab" href="#wakeword" data-tab="wakeword" role="tab">
-        Wake Word <span class="dot" id="dot-wakeword"></span>
+        <svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+        <span class="tab-label">Wake Word</span> <span class="dot" id="dot-wakeword"></span>
       </a>
       <a class="tab" href="#voice" data-tab="voice" role="tab">
-        Voice <span class="dot" id="dot-voice"></span>
+        <svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>
+        <span class="tab-label">Voice</span> <span class="dot" id="dot-voice"></span>
       </a>
-      <a class="tab" href="#lab" data-tab="lab" role="tab">Test Lab</a>
-      <a class="tab" href="#settings" data-tab="settings" role="tab">Settings</a>
+      <a class="tab" href="#lab" data-tab="lab" role="tab">
+        <svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6"/><path d="M10 3v6.5L4.5 19a1.5 1.5 0 0 0 1.3 2.2h12.4a1.5 1.5 0 0 0 1.3-2.2L14 9.5V3"/><path d="M7.5 15h9"/></svg>
+        <span class="tab-label">Test Lab</span>
+      </a>
+      <a class="tab" href="#settings" data-tab="settings" role="tab">
+        <svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+        <span class="tab-label">Settings</span>
+      </a>
     </div>
   </nav>
 
@@ -35,6 +55,13 @@
           <h1>Train your own speech models, locally.</h1>
           <p>Make a custom wake word, or clone your own voice for text-to-speech.
              Everything runs on this machine, and the results drop straight into Home Assistant.</p>
+        </div>
+
+        <div id="install-card" class="card install hidden">
+          <img src="static/icons/icon-192.png" alt="" width="44" height="44" />
+          <p><strong>Use it like an app</strong><span id="install-text"></span></p>
+          <button id="install-btn" class="btn btn--primary hidden">Install</button>
+          <button id="install-dismiss" class="btn btn--ghost" aria-label="Hide">✕</button>
         </div>
 
         <div id="gpu-warning" class="banner banner--warning hidden">

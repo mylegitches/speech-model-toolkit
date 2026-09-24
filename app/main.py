@@ -8,6 +8,7 @@
   /settings/   AI connections, speech recognition and audio (app/settings)
 """
 
+import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict
@@ -26,6 +27,9 @@ from .wakeword import pipeline as ww
 
 _DIR = Path(__file__).parent
 
+# Not in every system mime table; browsers want this type for the web app manifest
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -38,6 +42,34 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="Speech Model Toolkit", lifespan=lifespan, docs_url=None, redoc_url=None
 )
+
+
+class Revalidate:
+    """Browsers must re-check pages/scripts/styles (a cheap 304 when unchanged),
+    so an updated container never runs new HTML with stale cached JS or CSS.
+
+    Plain ASGI (only touches response headers): unlike @app.middleware it leaves
+    streaming responses and long background training tasks alone."""
+
+    def __init__(self, app) -> None:  # Starlette passes the wrapped app as app=
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def send_with_header(message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                if not any(k.lower() == b"cache-control" for k, _ in headers):
+                    headers.append((b"cache-control", b"no-cache"))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_header)
+
+
+app.add_middleware(Revalidate)
 
 
 @app.get("/api/status")

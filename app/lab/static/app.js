@@ -81,6 +81,10 @@ $('#start-btn').addEventListener('click', () => (ws ? stop() : start()));
 async function start() {
   const wakeword = $('#wakeword-select').value;
   if (!wakeword) return;
+  // Phones only allow audio started by a tap: prepare it before any await
+  SMT.unlockAudio($('#player'));
+  audioCtx = new AudioContext({ sampleRate: 16000 });
+  SMT.keepAwake(true);
   await loadOptions();  // pick up Settings changes
 
   try {
@@ -92,6 +96,7 @@ async function start() {
     });
   } catch (err) {
     note(`Microphone error: ${err.message}`, true);
+    stop();
     return;
   }
 
@@ -118,7 +123,8 @@ async function start() {
 }
 
 async function startCapture() {
-  audioCtx = new AudioContext({ sampleRate: 16000 });
+  if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 16000 });
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
   await audioCtx.audioWorklet.addModule('../static/mic-processor.js');
   micNode = new AudioWorkletNode(audioCtx, 'mic-processor');
   micNode.port.onmessage = (evt) => {
@@ -142,7 +148,8 @@ function stop() {
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
   if (mediaStream) { mediaStream.getTracks().forEach((t) => t.stop()); mediaStream = null; }
   $('#player').pause();
-  setState('stopped', 'Click Start listening, then say your wake word.');
+  SMT.keepAwake(false);
+  setState('stopped', 'Press Start listening, then say your wake word.');
   $('#start-btn').textContent = '🎤 Start listening';
   $('#start-btn').classList.remove('listening');
   $('#start-btn').disabled = !$('#wakeword-select').value;
@@ -275,6 +282,7 @@ function note(text, isError = false) {
 
 $('#ask-form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  SMT.unlockAudio($('#player'));
   const input = $('#ask-input');
   const text = input.value.trim();
   if (!text) return;

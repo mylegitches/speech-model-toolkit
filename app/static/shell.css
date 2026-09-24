@@ -1,7 +1,7 @@
 /* Landing page shell: tab bar, panels and the Home tab. Common styles
    (colors, cards, buttons, banners) come from theme.css. */
 
-:root { --topbar-h: 56px; }
+:root { --topbar-h: 56px; --nav-h: 60px; }
 
 html, body { height: 100%; }
 body {
@@ -37,6 +37,7 @@ body {
   transition: color 0.15s, border-color 0.15s;
 }
 .tab:hover { color: var(--text); }
+.tab-icon { display: none; flex: none; }
 .tab.active { color: var(--text); border-bottom-color: var(--accent-text); }
 
 /* Status dot on a tab: pulses while that tool is busy */
@@ -84,13 +85,52 @@ main { flex: 1; min-height: 0; position: relative; }
 .notes h3 { font-size: 0.95rem; margin-bottom: 0.3rem; }
 .notes p { color: var(--muted); font-size: 0.9rem; }
 
+/* ---- Phones: app-style bottom tab bar ------------------------------------- */
 @media (max-width: 640px) {
-  .topbar { gap: 0.5rem; padding: 0 0.5rem; }
-  .brand span { display: none; }
-  .tab { padding: 0 0.45rem; font-size: 0.85rem; }
-  .tabs { overflow-x: auto; }
-  .home-inner { padding: 1.75rem 1rem 3rem; }
-  .hero h1 { font-size: 1.6rem; }
-  .tools, .notes { grid-template-columns: 1fr; }
-  .stats { grid-template-columns: 1fr; }
+  :root { --topbar-h: 50px; }
+
+  .topbar {
+    height: calc(var(--topbar-h) + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 1rem 0;
+  }
+  .brand { font-size: 0.98rem; }
+
+  .tabs {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    height: calc(var(--nav-h) + env(safe-area-inset-bottom));
+    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    gap: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+  .tab {
+    position: relative;
+    flex: 1; min-width: 0;
+    flex-direction: column; justify-content: center; gap: 3px;
+    padding: 0;
+    font-size: 0.68rem; font-weight: 600;
+    border-bottom: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tab-icon { display: block; }
+  .tab-label { white-space: nowrap; }
+  .tab.active { color: var(--accent-text); }
+  .tab .dot { position: absolute; top: 9px; left: calc(50% + 9px); }
+
+  main { margin-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)); }
+
+  .home-inner { padding: 1.5rem 1rem 2rem; gap: 1.25rem; }
+  .hero h1 { font-size: 1.55rem; }
+  .hero p { font-size: 0.98rem; }
+  .tools, .notes { grid-template-columns: 1fr; gap: 1rem; }
+  .stats div { padding: 0.45rem 0.55rem; }
+  .stats dt { font-size: 0.66rem; }
+  .stats dd { font-size: 0.85rem; }
+  .tool-foot .btn { flex: 1; }
 }
+
+/* Offer "Add to Home Screen" on phones (see shell.js) */
+.card.install { flex-direction: row; align-items: center; gap: 0.9rem; padding: 0.9rem 1rem; }
+.install img { flex: none; border-radius: 10px; }
+.install p { flex: 1; color: var(--muted); font-size: 0.88rem; }
+.install strong { color: var(--text); display: block; }

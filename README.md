@@ -33,6 +33,12 @@ Browsers only allow the microphone on `localhost` or HTTPS. To record from anoth
 
 The port is published on all interfaces so other machines on your network can reach it. There is no login, so to keep it local only, change the port mapping in `docker-compose.yml` to `"127.0.0.1:8765:8765"`.
 
+### On your phone
+
+The whole app works on phones: on small screens the tabs move to a bottom bar, and buttons and fields are sized for touch. For the microphone the page must be served over **HTTPS** (e.g. behind a reverse proxy), which also lets you **add it to your home screen**: the Home tab offers this, and it then opens full screen like an app. While the Test Lab or the wake word tester is listening, the screen stays on so the phone doesn't sleep and cut the microphone.
+
+Behind a reverse proxy, enable **WebSocket** support (the Test Lab and wake word tester stream audio over WebSockets) and turn off response buffering (live training logs). For nginx: `proxy_http_version 1.1`, `proxy_set_header Upgrade $http_upgrade`, `proxy_set_header Connection "upgrade"`, `proxy_buffering off`, `proxy_read_timeout 3600s`.
+
 ---
 
 ## Wake Word tab

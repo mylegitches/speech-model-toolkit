@@ -210,6 +210,7 @@ function updateTrainBtn() {
 
 // ── Phrase preview (Piper TTS) ────────────────────────────────────────────
 previewBtn.addEventListener("click", async () => {
+  SMT.unlockAudio(previewAudio);  // phones: allow playing once the clip arrives
   const phrase = phraseInput.value.trim();
   if (!phrase) return;
 
@@ -479,6 +480,9 @@ micBtn.addEventListener("click", () => {
 async function startListening() {
   const modelName = modelSelect.value;
   if (!modelName) return;
+  // Phones only start audio from a tap: create the context before any await
+  audioCtx = new AudioContext({ sampleRate: 16000 });
+  SMT.keepAwake(true);
 
   const selectedDeviceId = micSelect.value;
   const audioPrefs = (await SMT.serverSettings())?.audio || {};
@@ -499,6 +503,7 @@ async function startListening() {
     micActiveLabel.style.display = "block";
   } catch (e) {
     alert("Microphone access denied: " + e.message);
+    stopListening();
     return;
   }
 
@@ -530,7 +535,8 @@ async function startListening() {
 }
 
 async function startMicCapture() {
-  audioCtx = new AudioContext({ sampleRate: 16000 });
+  if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 16000 });
+  if (audioCtx.state === "suspended") await audioCtx.resume();
 
   // AudioWorklet runs in a dedicated audio thread — no main-thread blocking,
   // no ScriptProcessorNode deprecation warning.
@@ -564,6 +570,7 @@ function stopListening() {
   if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
   if (testerWs && testerWs.readyState < 2) testerWs.close();
   testerWs = null;
+  SMT.keepAwake(false);
 
   micBtn.textContent = "🎤 Start Listening";
   micBtn.classList.remove("listening");
