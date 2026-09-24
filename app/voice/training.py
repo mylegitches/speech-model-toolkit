@@ -31,6 +31,10 @@ _REPO_DIR = _DIR.parents[1]
 ACCELERATORS = ("auto", "gpu", "cpu")
 LATEST_CHECKPOINT = "latest"
 """Special checkpoint value: continue from this voice's newest checkpoint."""
+AUTO_CHECKPOINT = "auto"
+"""Special checkpoint value: the pretrained voice closest to the recordings."""
+
+_SAMPLES_URL = "https://rhasspy.github.io/piper-samples/samples/"
 
 PRESETS = {
     "quick": {"label": "Quick test", "hours": 0.5, "hint": "~30 min, rough"},
@@ -162,6 +166,8 @@ class PretrainedCheckpoint:
     name: str
     gender: str
     url: str
+    sample_url: str = ""
+    """Official sample clip of the matching released voice (piper-samples)."""
 
 
 def load_checkpoint_catalog(
@@ -183,6 +189,8 @@ def load_checkpoint_catalog(
                 continue
 
             name = f"{parts[-3]} ({parts[-4]})"
+            # Same <lang>/<locale>/<voice>/<quality> layout as the checkpoints
+            sample_url = _SAMPLES_URL + "/".join(parts[-5:-1]) + "/speaker_0.mp3"
             entries = catalog.setdefault(group, [])
             if not any(e.url == url for e in entries):
                 entries.append(
@@ -191,6 +199,7 @@ def load_checkpoint_catalog(
                         name=name,
                         gender="male" if gender == "M" else "female",
                         url=url,
+                        sample_url=sample_url,
                     )
                 )
 
@@ -240,7 +249,7 @@ class TrainingSettings:
     """Epochs to train past the starting checkpoint (0 = no limit)."""
 
     checkpoint: str = ""
-    """Path/URL of a medium quality checkpoint, "latest", or empty (scratch)."""
+    """Path/URL of a medium quality checkpoint, "latest", "auto", or empty (scratch)."""
 
     batch_size: int = 0
     """0 = pick from GPU memory."""
@@ -549,6 +558,10 @@ class TrainingManager:
             self._log(ws, f"Prepared {num_utterances} recordings")
 
             # 2. Starting checkpoint
+            if settings.checkpoint == AUTO_CHECKPOINT:
+                settings.checkpoint = await self._auto_checkpoint(ws)
+                self._check_running(ws)
+
             checkpoint_path: Optional[Path] = None
             if settings.checkpoint == LATEST_CHECKPOINT:
                 checkpoint_path = ws.latest_checkpoint()
@@ -789,6 +802,35 @@ class TrainingManager:
         return_code = await proc.wait()
         if return_code != 0:
             raise RuntimeError(f"Command failed with exit code {return_code}")
+
+    async def _auto_checkpoint(self, ws: Workspace) -> str:
+        """URL of the pretrained voice closest to this voice's recordings.
+
+        Falls back to the language/gender default when matching isn't possible."""
+        from . import matching  # imports this module
+
+        voice = ws.voice
+        fallback = suggest_checkpoint(
+            load_checkpoint_catalog(), voice.language, voice.espeak_voice, voice.gender
+        )
+        self._log(ws, "Auto-detect: finding the pretrained voice closest to your recordings")
+        try:
+            match = await matching.find(
+                voice,
+                voice.root.parent.parent / "speaker-match",
+                lambda line: self._log(ws, f"  {line}"),
+            )
+        except Exception as err:
+            if fallback is None:
+                raise RuntimeError(f"Auto-detect failed ({err}) and there is no default") from err
+            self._log(ws, f"Auto-detect not possible ({err}); using {fallback.name}")
+            return fallback.url
+
+        for result in match["results"][:3]:
+            self._log(ws, f"  {result['name']} · {result['gender']}: {result['score']:.0%} similar")
+        best = match["results"][0]
+        self._log(ws, f"Starting from {best['name']} (closest match)")
+        return best["url"]
 
     async def _get_checkpoint(self, ws: Workspace, checkpoint: str) -> Path:
         if not re.match(r"^https?://", checkpoint):

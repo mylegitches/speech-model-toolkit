@@ -91,7 +91,9 @@ async function selectVoice(name) {
     await listMicrophones();
     checkMicMatch();
   }
+  matchState = null;
   fillTrainForm(voice.defaults);
+  loadMatch();
   logCount = 0;
   $('#log-panel').textContent = '';
   renderStatus(voice.training);
@@ -148,6 +150,7 @@ function updateRecorded(count) {
     fill.style.background = 'var(--success)';
   }
   $('#readiness-text').textContent = text;
+  renderStartOptions();  // Find match needs a few recordings
 }
 
 async function loadPrompt() {
@@ -466,6 +469,9 @@ function fillCheckpoints(defaults) {
   if (voice.training.hasCheckpoint) {
     select.add(new Option("Continue this voice's training", 'latest'));
   }
+  if (voice.startingVoices.length) {
+    select.add(new Option('Auto-detect: closest to your recordings', 'auto'));
+  }
   const groups = Object.entries(info.checkpoints).sort(([a], [b]) => {
     const rank = (g) => (voice.checkpointGroups.includes(g) ? 0 : g === 'generic' ? 1 : 2);
     return rank(a) - rank(b) || a.localeCompare(b);
@@ -483,11 +489,163 @@ function fillCheckpoints(defaults) {
   select.value = known ? defaults.checkpoint : '__custom__';
   $('#checkpoint-input').value = known ? '' : defaults.checkpoint;
   show($('#checkpoint-input'), select.value === '__custom__');
+  renderStartOptions();
 }
 
 $('#checkpoint-select').addEventListener('change', () => {
   show($('#checkpoint-input'), $('#checkpoint-select').value === '__custom__');
+  renderStartOptions();
 });
+
+// ---- Starting voice picker (mirrors the "Start from" select) --------------------
+
+let matchState = null;   // GET api/voices/{name}/match
+let matchTimer = null;
+
+function chooseStart(value) {
+  $('#checkpoint-select').value = value;
+  show($('#checkpoint-input'), false);
+  renderStartOptions();
+}
+
+function matchSummary() {
+  const min = matchState?.minRecordings ?? 5;
+  const suggested = voice.startingVoices.find((v) => v.url === voice.suggested);
+  const fallback = suggested ? suggested.name : 'the default voice';
+  if (matchState?.state === 'running') return matchState.detail || 'Comparing your recordings…';
+  if (matchState?.state === 'error') return `Could not compare: ${matchState.error}`;
+  const match = matchState?.match;
+  if (match && match.results.length) {
+    const best = match.results[0];
+    const more = voice.recorded - match.recordings;
+    const since = more > 0 ? `; ${more} new since` : '';
+    return `Best match so far: ${best.name} (${Math.round(best.score * 100)}% similar, from ${match.used} recordings${since}). Checked again when training starts.`;
+  }
+  if (voice.recorded < min) {
+    return `Picks the closest voice when training starts. Needs ${min}+ recordings (you have ${voice.recorded}); until then it uses ${fallback}.`;
+  }
+  return 'Compares your recordings with the voices below when training starts. “Find match” shows the ranking now.';
+}
+
+function startRow(value, title, subtitle, extras = []) {
+  const row = document.createElement('label');
+  row.className = 'start-option';
+  const radio = document.createElement('input');
+  radio.type = 'radio';
+  radio.name = 'start-voice';
+  radio.value = value;
+  radio.checked = $('#checkpoint-select').value === value;
+  row.classList.toggle('selected', radio.checked);
+  radio.addEventListener('change', () => chooseStart(value));
+  const main = document.createElement('span');
+  main.className = 'opt-main';
+  const strong = document.createElement('strong');
+  strong.textContent = title;
+  const small = document.createElement('small');
+  small.textContent = subtitle;
+  main.append(strong, small);
+  row.append(radio, main, ...extras);
+  return row;
+}
+
+function renderStartOptions() {
+  const box = $('#start-options');
+  if (!voice || !box) return;
+  box.innerHTML = '';
+
+  if (voice.training.hasCheckpoint) {
+    box.append(startRow('latest', "Continue this voice's training", 'Picks up where the last run stopped'));
+  }
+  if (!voice.startingVoices.length) {
+    const none = document.createElement('p');
+    none.className = 'hint';
+    none.textContent = 'No pretrained voices for this language; choose one in Advanced settings.';
+    box.append(none);
+    return;
+  }
+
+  const running = matchState?.state === 'running';
+  const findBtn = document.createElement('button');
+  findBtn.type = 'button';
+  findBtn.className = 'btn btn--secondary';
+  findBtn.textContent = running ? 'Comparing…' : (matchState?.match ? 'Check again' : 'Find match');
+  findBtn.disabled = running || voice.recorded < (matchState?.minRecordings ?? 5);
+  findBtn.addEventListener('click', (e) => { e.preventDefault(); findMatch(); });
+  const auto = startRow('auto', 'Auto-detect (recommended)', matchSummary(), [findBtn]);
+  auto.classList.add('auto');
+  box.append(auto);
+
+  const results = matchState?.match?.results || [];
+  const scores = Object.fromEntries(results.map((r) => [r.url, r.score]));
+  const bestUrl = results[0]?.url;
+  const voices = [...voice.startingVoices].sort((a, b) => (
+    (scores[b.url] ?? -1) - (scores[a.url] ?? -1)
+    || (a.gender !== voice.gender) - (b.gender !== voice.gender)
+    || a.name.localeCompare(b.name)
+  ));
+  for (const v of voices) {
+    const play = document.createElement('button');
+    play.type = 'button';
+    play.className = 'btn btn--secondary';
+    play.textContent = '▶';
+    play.title = `Hear ${v.name}`;
+    play.addEventListener('click', (e) => { e.preventDefault(); playSample(v.sample, play); });
+
+    const score = document.createElement('span');
+    score.className = `score${v.url === bestUrl ? ' best' : ''}`;
+    score.textContent = v.url in scores ? `${Math.round(scores[v.url] * 100)}%` : '';
+    score.title = 'Similarity to your recordings';
+
+    const notes = [v.gender];
+    if (v.url === bestUrl) notes.push('closest match');
+    else if (v.url === voice.suggested && !results.length) notes.push('default pick');
+    box.append(startRow(v.url, v.name, notes.join(' · '), [score, play]));
+  }
+}
+
+let sampleButton = null;
+function playSample(url, button) {
+  const audio = $('#sample-audio');
+  const reset = () => { if (sampleButton) sampleButton.textContent = '▶'; sampleButton = null; };
+  if (sampleButton === button && !audio.paused) {
+    audio.pause();
+    reset();
+    return;
+  }
+  reset();
+  sampleButton = button;
+  button.textContent = '■';
+  audio.onended = reset;
+  audio.onerror = () => { button.textContent = 'no sample'; button.disabled = true; sampleButton = null; };
+  audio.src = url;
+  SMT.applyOutput(audio).then(() => audio.play()).catch(() => {});
+}
+
+async function loadMatch() {
+  clearTimeout(matchTimer);
+  if (!voice) return;
+  const name = voice.name;
+  try {
+    const state = await api(voiceUrl('/match'));
+    if (!voice || voice.name !== name) return;
+    matchState = state;
+  } catch (err) {
+    matchState = null;
+  }
+  renderStartOptions();
+  if (matchState?.state === 'running') matchTimer = setTimeout(loadMatch, 2000);
+}
+
+async function findMatch() {
+  try {
+    matchState = await postJson(voiceUrl('/match'), {});
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  renderStartOptions();
+  matchTimer = setTimeout(loadMatch, 1500);
+}
 
 function fillTrainForm(defaults) {
   fillCheckpoints(defaults);

@@ -73,7 +73,9 @@ Training settings (1000 samples, 10k steps, ...) are in `app/wakeword/config_tem
    | Best | 8 hours | |
    | Until I stop it | no limit | press **Stop** when it sounds right |
 
-   **Advanced settings** has the starting voice, hours, max epochs, batch size (auto-picked from GPU memory), device and sample rate. **Train more** continues where the last run stopped.
+   **Starting voice**: training fine-tunes a pretrained Piper voice, and one that already sounds like you gets there faster and cleaner. The Train card lists the pretrained voices for your language; press ▶ to hear each one (sample clips from [piper-samples](https://rhasspy.github.io/piper-samples/)), or pick **Auto-detect** (the default): when training starts it compares up to 24 of your recordings with every candidate using a speaker-recognition model ([SpeechBrain ECAPA](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb), runs locally) and starts from the closest one. **Find match** shows the ranking with similarity scores before you train. It needs at least 5 recordings; with fewer, it falls back to a voice of your language and chosen gender.
+
+   **Advanced settings** has the same choice for other languages plus a custom checkpoint or training from scratch, and hours, max epochs, batch size (auto-picked from GPU memory), device and sample rate. **Train more** continues where the last run stopped.
 4. **Test & install**: type anything and click **Speak**. During training, **Export latest version now** lets you hear progress. Then click **Download for Home Assistant**:
    1. In Home Assistant open **Settings → Add-ons → Piper → Open Web UI** and upload the `.onnx` and `.onnx.json` files (or copy them to `/share/piper`).
    2. Restart the Piper add-on if the voice doesn't show up.
@@ -121,6 +123,7 @@ data/
   voice/
     voices/          one folder per voice: recordings, training runs, exports
     checkpoints/     downloaded pretrained base voices
+    speaker-match/   speaker recognition model + sample clips for Auto-detect
     default-voices/  the Test Lab's default Piper voice
   stt-models/        Whisper models for the Test Lab
 ```

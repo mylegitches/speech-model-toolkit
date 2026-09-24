@@ -17,8 +17,10 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import matching
 from .training import (
     ACCELERATORS,
+    AUTO_CHECKPOINT,
     DEFAULT_PRESET,
     LATEST_CHECKPOINT,
     PRESETS,
@@ -87,6 +89,9 @@ def default_settings(voice: Voice, workspace: Workspace) -> Dict[str, Any]:
     settings = TrainingSettings()
     if workspace.latest_checkpoint() is not None:
         settings.checkpoint = LATEST_CHECKPOINT
+    elif matching.candidates(voice):
+        # Closest pretrained voice to the recordings, picked when training starts
+        settings.checkpoint = AUTO_CHECKPOINT
     else:
         suggested = suggest_checkpoint(
             CATALOG, voice.language, voice.espeak_voice, voice.gender
@@ -105,6 +110,12 @@ def voice_json(voice: Voice) -> Dict[str, Any]:
         "prompts": len(PROMPTS.get(voice.language, [])),
         "modelName": voice.model_stem,
         "checkpointGroups": catalog_groups(voice.language, voice.espeak_voice),
+        "startingVoices": matching.candidates(voice),
+        "suggested": getattr(
+            suggest_checkpoint(CATALOG, voice.language, voice.espeak_voice, voice.gender),
+            "url",
+            "",
+        ),
         "defaults": default_settings(voice, workspace),
         "training": workspace.status(),
     }
@@ -217,6 +228,54 @@ async def api_upload(name: str, dataset: UploadFile = File(...)) -> Dict[str, An
         raise ValueError("Upload must be a .zip file") from err
 
     return {"imported": imported, "recorded": voice.num_recorded()}
+
+
+# ---- Starting voice auto-detect ----------------------------------------------
+
+_match_jobs: Dict[str, Dict[str, Any]] = {}
+
+
+def _match_status(voice: Voice) -> Dict[str, Any]:
+    job = _match_jobs.get(voice.name, {})
+    return {
+        "state": job.get("state", "idle"),
+        "error": job.get("error"),
+        "detail": job.get("detail", ""),
+        "match": matching.cached(voice),
+        "minRecordings": matching.MIN_RECORDINGS,
+    }
+
+
+@app.get("/api/voices/{name}/match")
+async def api_match(name: str) -> Dict[str, Any]:
+    return _match_status(store.get(name))
+
+
+@app.post("/api/voices/{name}/match")
+async def api_find_match(name: str) -> Dict[str, Any]:
+    """Compare the recordings with the pretrained voices (runs in the background)."""
+    voice = store.get(name)
+    if _match_jobs.get(voice.name, {}).get("state") == "running":
+        return _match_status(voice)
+    if voice.num_recorded() < matching.MIN_RECORDINGS:
+        raise ValueError(f"Record at least {matching.MIN_RECORDINGS} sentences first")
+
+    job: Dict[str, Any] = {"state": "running", "detail": "Starting…"}
+    _match_jobs[voice.name] = job
+
+    async def run() -> None:
+        def log(line: str) -> None:
+            job["detail"] = line
+
+        try:
+            await matching.find(voice, DATA_DIR / "speaker-match", log)
+            job["state"] = "done"
+        except Exception as err:  # reported to the page
+            _LOGGER.exception("Voice matching failed")
+            job.update(state="error", error=str(err))
+
+    job["task"] = asyncio.create_task(run())
+    return _match_status(voice)
 
 
 # ---- Training ----------------------------------------------------------------

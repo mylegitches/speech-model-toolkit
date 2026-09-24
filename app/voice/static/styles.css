@@ -67,3 +67,21 @@
 .howto { padding-left: 1.3rem; font-size: 0.9rem; color: var(--muted); display: flex; flex-direction: column; gap: 0.3rem; }
 .howto strong { color: var(--text); }
 .mic-row .btn { align-self: flex-end; }
+
+/* Starting voice picker */
+.start-voice { display: flex; flex-direction: column; gap: 0.6rem; }
+.start-options { display: flex; flex-direction: column; gap: 0.4rem; }
+.start-option {
+  display: flex; flex-direction: row; align-items: center; gap: 0.7rem;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.55rem 0.75rem; color: var(--text); cursor: pointer;
+}
+.start-option.selected { border-color: var(--accent-h); background: var(--accent-soft); }
+.start-option input[type=radio] { accent-color: var(--accent-h); width: 1.1rem; height: 1.1rem; margin: 0; flex: none; padding: 0; }
+.start-option .opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+.start-option .opt-main small { color: var(--muted); font-size: 0.8rem; }
+.start-option .btn { padding: 0.3rem 0.7rem; font-size: 0.82rem; }
+.start-option .score { font-weight: 700; font-size: 0.85rem; color: var(--muted); min-width: 3.2rem; text-align: right; }
+.start-option .score.best { color: var(--accent-text); }
+.start-option.auto { border-style: dashed; }
+.start-option.auto.selected { border-style: solid; }

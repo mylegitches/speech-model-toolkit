@@ -101,6 +101,16 @@
     <section id="train-card" class="card hidden">
       <h2><span class="step">3</span> Train</h2>
 
+      <div class="start-voice">
+        <div>
+          <strong>Starting voice</strong>
+          <p class="hint">Training fine-tunes a pretrained voice. One that already sounds like you gets there faster and cleaner. Press ▶ to hear each one.</p>
+        </div>
+        <div id="start-options" class="start-options" role="radiogroup"></div>
+        <p class="hint">Other languages, your own checkpoint or training from scratch: <em>Advanced settings</em> below.</p>
+        <audio id="sample-audio" class="hidden" preload="none"></audio>
+      </div>
+
       <div id="presets" class="presets"></div>
 
       <details id="advanced" class="advanced">
