@@ -37,6 +37,7 @@ import numpy as np
 from ..errors import explain_failure, friendly_ffmpeg_error
 from ..lab import stt
 from ..settings import store as settings_store
+from . import speakers as people
 from .voices import Voice
 
 _LOGGER = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ DENOISE_LEVELS = ("off", "light", "strong")
 _CONTEXT = 0.5  # seconds of audio around a clip so the filters settle before it
 
 _live: Dict[str, Dict[str, Any]] = {}  # take id -> take being processed
+_work: Optional[asyncio.Semaphore] = None  # one take at a time (Whisper is CPU-heavy)
 
 
 def _takes_dir(voice: Voice) -> Path:
@@ -329,7 +331,8 @@ def new_take(voice: Voice, filename: str) -> Path:
     return take_dir / f"source{suffix if suffix and len(suffix) <= 6 else '.webm'}"
 
 
-def start(voice: Voice, source: Path, denoise: Any = "light", diarize: bool = False) -> Dict[str, Any]:
+def start(voice: Voice, source: Path, denoise: Any = "light", diarize: bool = False,
+          name: str = "") -> Dict[str, Any]:
     """Check the upload, then transcribe (and optionally diarize) it in the background.
 
     Files with several audio tracks wait in state "choose_track" (see choose_track)."""
@@ -357,7 +360,7 @@ def start(voice: Voice, source: Path, denoise: Any = "light", diarize: bool = Fa
         "state": "choose_track", "detail": "", "error": None, "created": time.time(),
         "duration": None, "segments": [], "model": _model_for(voice),
         "denoise": _level(denoise), "diarize": bool(diarize),
-        "source": source.name, "size": size,
+        "source": source.name, "size": size, "name": " ".join(str(name).split())[:200],
         "tracks": tracks, "track": recommended, "dialogue": tracks[recommended]["surround"],
     }
     _LOGGER.info("Freeform take %s/%s uploaded: %s (%.1f MB), %d audio track(s)",
@@ -399,15 +402,26 @@ def _begin(voice: Voice, take_dir: Path, take: Dict[str, Any]) -> Dict[str, Any]
     started = time.monotonic()
 
     async def run() -> None:
+        global _work
+        if _work is None:
+            _work = asyncio.Semaphore(1)
+        if _work.locked():
+            progress("Waiting for the other files to finish…")
         try:
-            result = await asyncio.to_thread(
-                _transcribe, take_dir, source, take["model"],
-                voice.language.split("-")[0].lower(), take["diarize"], progress, track, dialogue,
-            )
-            take.update(result)
-            if take["diarize"] and take["segments"]:
-                progress("Finding speakers…")
-                await _diarize(voice, take_dir, take, progress)
+            async with _work:
+                progress("Starting…")
+                result = await asyncio.to_thread(
+                    _transcribe, take_dir, source, take["model"],
+                    voice.language.split("-")[0].lower(), take["diarize"], progress, track, dialogue,
+                )
+                take.update(result)
+                if take["diarize"] and take["segments"]:
+                    progress("Finding speakers…")
+                    await _diarize(voice, take_dir, take, progress)
+                    try:
+                        people.link(voice, take_id, take)
+                    except Exception:  # matching across files is a bonus, never fatal
+                        _LOGGER.exception("Matching the speakers of %s/%s to known people failed", voice.name, take_id)
             take.update(state="done", detail="")
             _LOGGER.info("Freeform take %s/%s done in %.0fs: %.0fs of audio, %d clips%s",
                          voice.name, take_id, time.monotonic() - started, take["duration"] or 0,
@@ -499,7 +513,23 @@ def save(voice: Voice, take_id: str, keep: List[Dict[str, Any]]) -> int:
     return saved
 
 
+def retag_person(voice: Voice, take_id: str, old: str, new: str) -> None:
+    """After merging two people, point a take's speakers at the merged one."""
+    take_dir = _takes_dir(voice) / take_id
+    if take_id in _live or not (take_dir / "take.json").is_file():
+        return
+    take = _read(take_dir)
+    changed = False
+    for speaker in take.get("speakers") or []:
+        if speaker.get("person") == old:
+            speaker["person"] = new
+            changed = True
+    if changed:
+        _write(take_dir, take)
+
+
 def discard(voice: Voice, take_id: str) -> None:
     if take_id in _live:
         raise RuntimeError("Still processing; wait for it to finish")
     shutil.rmtree(_take_dir(voice, take_id), ignore_errors=True)
+    people.forget_take(voice, take_id)

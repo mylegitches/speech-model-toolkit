@@ -9,7 +9,8 @@ Request: {"wav": 22050 Hz take audio, "segments": [[start, end], ...],
 Prints "LOG <text>" progress lines, then "RESULT {json}":
   {"labels": [speaker id per segment, -1 = too little speech to tell],
    "speakers": [{"id", "seconds", "clips", "samples": [segment indexes],
-                 "similarity": to the voice's recordings or null}, ...]}  (most speech first)
+                 "similarity": to the voice's recordings or null,
+                 "centroid": mean embedding}, ...]}  (most speech first)
 
 Each clip gets an ECAPA speaker embedding; clips are grouped by average-linkage
 clustering on cosine distance. Clips are already split at pauses and Whisper
@@ -91,6 +92,8 @@ def main() -> None:
             "clips": int(len(members)),
             "samples": good[:3],
             "similarity": None if mine is None else round(float(centroid @ mine), 3),
+            # Voice fingerprint, to recognise this person in other files (speakers.py)
+            "centroid": [round(float(v), 5) for v in centroid],
         })
 
     log(f"Found {len(speakers)} speaker(s)")

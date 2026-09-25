@@ -11,7 +11,7 @@ import zipfile
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .. import errors
-from . import freeform, matching
+from . import freeform, matching, speakers
 from .training import (
     ACCELERATORS,
     AUTO_CHECKPOINT,
@@ -235,6 +235,7 @@ async def api_freeform_start(
     denoise: str = Form("light"),
     diarize: bool = Form(False),
     mic: str = Form(""),
+    original_name: str = Form(""),  # e.g. "Season 1/episode 03.mkv" from a folder import
 ) -> Dict[str, Any]:
     """A long take (recorded, or an uploaded audio/video file): transcribe it,
     split it into clips and, with diarize, find who speaks in each clip."""
@@ -245,7 +246,7 @@ async def api_freeform_start(
     source = freeform.new_take(voice, audio.filename or f"take{extension}")
     with open(source, "wb") as out:
         await asyncio.to_thread(shutil.copyfileobj, audio.file, out, 4 * 2**20)
-    take = freeform.start(voice, source, denoise, diarize)
+    take = freeform.start(voice, source, denoise, diarize, original_name or audio.filename or "")
     voice.remember_microphone(mic)
     return take
 
@@ -253,6 +254,36 @@ async def api_freeform_start(
 @app.get("/api/voices/{name}/freeform/{take_id}")
 async def api_freeform_take(name: str, take_id: str) -> Dict[str, Any]:
     return freeform.get_take(store.get(name), take_id)
+
+
+# ---- People recognised across diarized files --------------------------------
+
+
+@app.get("/api/voices/{name}/speakers")
+async def api_people(name: str) -> Dict[str, Any]:
+    return speakers.public(store.get(name))
+
+
+class PersonUpdate(BaseModel):
+    name: Optional[str] = None
+    target: Optional[bool] = None
+
+
+@app.put("/api/voices/{name}/speakers/{person_id}")
+async def api_person_update(name: str, person_id: str, request: PersonUpdate) -> Dict[str, Any]:
+    """Rename a person, or mark/unmark them as the voice you want."""
+    return speakers.update(store.get(name), person_id, request.name, request.target)
+
+
+class MergeRequest(BaseModel):
+    into: str
+
+
+@app.post("/api/voices/{name}/speakers/{person_id}/merge")
+async def api_person_merge(name: str, person_id: str, request: MergeRequest) -> Dict[str, Any]:
+    voice = store.get(name)
+    return speakers.merge(voice, person_id, request.into,
+                          lambda take_id, old, new: freeform.retag_person(voice, take_id, old, new))
 
 
 class TrackRequest(BaseModel):

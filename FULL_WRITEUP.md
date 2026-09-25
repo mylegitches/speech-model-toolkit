@@ -66,10 +66,11 @@ The app is one page with five tabs: **Home, Wake Word, Voice, Test Lab, Settings
 
 - **Read sentences:** a teleprompter-style recorder with over 1,000 varied prompts per language (e.g. 1,150 for US English). Keyboard shortcuts (R record, P play, S save, K skip), a level meter with clipping warning, and a readiness bar (50 clips minimum, 300+ recommended, 1,000 ideal).
 - **Speak freely:** just talk (a story, your day, a book read aloud) for up to 30 minutes. The take is transcribed locally with Whisper using word-level timestamps and **automatically cut into sentence-sized clips** at sentence ends, pauses and speaker turns.
-- **Import file:** upload audio *or video* up to 8 GB (MP4, MKV, AVI, MOV, WMV, MP3, WAV, FLAC and many more); only the sound is used.
+- **Import file:** upload audio *or video* up to 8 GB each (MP4, MKV, AVI, MOV, WMV, MP3, WAV, FLAC and many more); only the sound is used. Import **several files, a whole folder with its subfolders, or drag and drop**, then tick the files you want from the list. Files are queued and processed one at a time.
   - **Multiple audio tracks** (movie languages, commentary): you choose the track, and the one in the voice's language is preselected.
   - **Surround sound (5.1/7.1):** only the **center channel** is used by default. That's where film dialogue is mixed, away from the music and effects.
   - **Speaker detection (diarization):** for interviews, podcasts and movies, every clip is assigned to a speaker. A **"Who do you want?"** screen shows one card per speaker with talk time, three playable samples and a quote. Pick one and only their clips are kept. If the voice already has recordings, the speaker who sounds most like them is **marked and preselected**.
+  - **People recognised across files:** for a series of episodes with recurring people, every speaker is matched against the people found in earlier files by voice fingerprint, so the same person keeps the same card and name everywhere ("also in 3 other files"). Name people, merge duplicates, and mark **This is the voice** to preselect that person in every file and **save their clips from all files at once**.
   - **Prepared datasets** (LJSpeech-style `metadata.csv` or audio + `.txt` pairs) can be imported as a zip.
 - **Review before anything is added:** every automatically cut clip can be played, its transcript corrected, and unticked if it has mistakes, music or other voices.
 - **Background noise removal** per take, switchable while reviewing (the original audio is always kept):
@@ -195,7 +196,7 @@ One Docker container · FastAPI server (Python)
 1. **Two incompatible ML stacks in one container.** openWakeWord's training recipe pins PyTorch 2.2 / NumPy 1.26; Piper's current trainer needs a much newer PyTorch. Instead of two containers, the image has two Python environments, and the web server drives Piper training as a subprocess.
 2. **Merging two apps into one product.** Two separate projects (a wake word trainer and a voice trainer) became mounted sub-applications behind one server, with prefix-relative URLs, one shared theme, and iframes that stay alive, so a 3-hour voice training keeps streaming while you test a wake word.
 3. **Auto-detect via speaker embeddings.** Each pretrained voice's official sample and the user's clips are embedded with ECAPA-TDNN. Cosine similarity ranks the candidates, and fine-tuning starts from the closest voice.
-4. **Diarization without paid models or tokens.** Clips are cut at pauses, sentence ends and Whisper segment boundaries (usually speaker turns), embedded, grouped by average-linkage clustering on cosine distance, and matched against the voice's existing recordings to suggest the right person.
+4. **Diarization without paid models or tokens, and across files.** Clips are cut at pauses, sentence ends and Whisper segment boundaries (usually speaker turns), embedded, grouped by average-linkage clustering on cosine distance, and matched against the voice's existing recordings to suggest the right person. Each speaker's mean fingerprint is also matched greedily (best pairs first, one person per speaker per file) against a per-voice library of people, refining that person's fingerprint as more of their speech is seen, so recurring people get stable identities across a whole series of files.
 5. **Dialogue extraction from movies.** ffprobe lists the audio tracks; the voice's language is preselected (commentary tracks avoided). For 5.1/7.1 mixes, ffmpeg keeps only the center channel (`pan=mono|c0=FC`), where film dialogue lives.
 6. **Noise removal, measured rather than assumed.** The first filter setting barely worked (<2 dB). Measuring noise and speech levels separately showed a 60 Hz hum was hiding the noise floor from the FFT denoiser. Removing it first, and running RNNoise at the 48 kHz it expects, gave +20 dB and +36 dB improvements.
 7. **A real-time voice loop in the browser.** AudioWorklet captures 16 kHz PCM → WebSocket → wake word scoring every 80 ms → VAD end-of-speech → Whisper → LLM → Piper → playback, with the microphone muted during playback to prevent self-triggering.
@@ -215,6 +216,9 @@ New voice → Dataset → Speak freely → talk about your weekend for 10 minute
 
 **3. "Pull one actor's voice out of an interview video"** (with permission)
 Import file → choose the English 5.1 track (dialogue channel on) → speaker detection → "Who do you want?" → play the samples → pick the speaker → review → train.
+
+**3b. "A whole series"** (with permission)
+📁 Choose folder → the season's episodes are listed → Import → each episode is processed in turn → the same people are recognised in every episode → name the one you want and mark "This is the voice" → review → "Save Jerry's clips from all 10 files".
 
 **4. "A talking assistant in my own voice"**
 Settings → add an AI connection (e.g. OpenRouter or a local Ollama) → Test Lab → say your wake word → "What's the capital of France?" → hear the answer in your cloned voice.

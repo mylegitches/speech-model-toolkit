@@ -491,58 +491,340 @@ $('#free-record-btn').addEventListener('click', async () => {
   }, 500);
 });
 
-// Videos usually have several speakers (and a soundtrack)
-$('#free-file').addEventListener('change', () => {
-  const file = $('#free-file').files[0];
-  const video = file && (file.type.startsWith('video/')
-    || /\.(mkv|mp4|m4v|avi|mov|wmv|flv|webm|ts|m2ts|mts|mpg|mpeg|vob|3gp|ogv)$/i.test(file.name));
-  if (video) {
+// ---- Import: files or whole folders (with subfolders) ----------------------------
+
+const MEDIA_FILE = /\.(mkv|mp4|m4v|avi|mov|wmv|flv|webm|ts|m2ts|mts|mpg|mpeg|vob|3gp|ogv|mp3|wav|flac|ogg|opus|m4a|m4b|aac|ac3|eac3|dts|wma|aiff?)$/i;
+const VIDEO_FILE = /\.(mkv|mp4|m4v|avi|mov|wmv|flv|webm|ts|m2ts|mts|mpg|mpeg|vob|3gp|ogv)$/i;
+let importFiles = [];  // [{file, path, selected}]
+let importSkipped = 0;
+
+function formatSize(bytes) {
+  return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`;
+}
+
+function setImportFiles(entries) {
+  const media = entries.filter((e) => MEDIA_FILE.test(e.path) || e.file.type.startsWith('video/') || e.file.type.startsWith('audio/'));
+  importSkipped = entries.length - media.length;
+  importFiles = media
+    .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }))
+    .map((e) => ({ ...e, selected: true }));
+  // Videos usually have several speakers (and a soundtrack)
+  if (importFiles.some((e) => VIDEO_FILE.test(e.path) || e.file.type.startsWith('video/'))) {
     $('#free-diarize').checked = true;
     $('#file-denoise').value = 'strong';
+  }
+  renderImportList();
+}
+
+function renderImportList() {
+  const box = $('#import-list');
+  box.innerHTML = '';
+  const chosen = importFiles.filter((e) => e.selected);
+  $('#free-upload-btn').textContent = chosen.length > 1 ? `Import ${chosen.length} files` : 'Import';
+  $('#free-upload-btn').disabled = chosen.length === 0;
+  if (!importFiles.length) {
+    if (importSkipped) box.append(el('p', { className: 'hint', textContent: `No audio or video files found (${importSkipped} other files skipped).` }));
+    show(box, importSkipped > 0);
+    return;
+  }
+  show(box, true);
+  const total = chosen.reduce((sum, e) => sum + e.file.size, 0);
+  const all = el('input', { type: 'checkbox', checked: chosen.length === importFiles.length, title: 'Select all' });
+  all.addEventListener('change', () => { importFiles.forEach((e) => { e.selected = all.checked; }); renderImportList(); });
+  box.append(el('div', { className: 'import-head' }, all, el('strong', {
+    textContent: `${chosen.length} of ${importFiles.length} file${importFiles.length === 1 ? '' : 's'} · ${formatSize(total)}`
+      + (importSkipped ? ` · ${importSkipped} other file${importSkipped === 1 ? '' : 's'} skipped` : ''),
+  })));
+  const list = el('div', { className: 'import-files' });
+  importFiles.forEach((entry) => {
+    const check = el('input', { type: 'checkbox', checked: entry.selected });
+    check.addEventListener('change', () => { entry.selected = check.checked; renderImportList(); });
+    list.append(el('label', { className: 'import-file' }, check,
+      el('span', { className: 'import-path', textContent: entry.path, title: entry.path }),
+      el('span', { className: 'dur', textContent: formatSize(entry.file.size) })));
+  });
+  box.append(list);
+}
+
+$('#free-file').addEventListener('change', () => {
+  setImportFiles([...$('#free-file').files].map((file) => ({ file, path: file.name })));
+});
+$('#free-folder-btn').addEventListener('click', () => $('#free-folder').click());
+$('#free-folder').addEventListener('change', () => {
+  // webkitRelativePath keeps the folder structure: "Season 1/episode 03.mkv"
+  setImportFiles([...$('#free-folder').files].map((file) => ({ file, path: file.webkitRelativePath || file.name })));
+});
+
+// Drag and drop files or folders onto the Import tab
+async function readEntry(entry, prefix = '') {
+  if (entry.isFile) {
+    const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+    return [{ file, path: prefix + file.name }];
+  }
+  if (!entry.isDirectory) return [];
+  const reader = entry.createReader();
+  const children = [];
+  // readEntries returns results in batches until it returns an empty list
+  for (;;) {
+    const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+    if (!batch.length) break;
+    children.push(...batch);
+  }
+  const nested = await Promise.all(children.map((c) => readEntry(c, `${prefix}${entry.name}/`)));
+  return nested.flat();
+}
+
+const dropZone = $('#file-mode');
+['dragenter', 'dragover'].forEach((type) => dropZone.addEventListener(type, (e) => {
+  e.preventDefault();
+  dropZone.classList.add('dropping');
+}));
+['dragleave', 'drop'].forEach((type) => dropZone.addEventListener(type, () => dropZone.classList.remove('dropping')));
+dropZone.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  const items = [...(e.dataTransfer.items || [])];
+  try {
+    const entries = items.map((i) => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null)).filter(Boolean);
+    const found = entries.length
+      ? (await Promise.all(entries.map((entry) => readEntry(entry)))).flat()
+      : [...e.dataTransfer.files].map((file) => ({ file, path: file.name }));
+    setImportFiles(found);
+  } catch (err) {
+    SMT.showError(`Could not read the dropped files: ${err.message}`);
   }
 });
 
 $('#free-upload-btn').addEventListener('click', async () => {
-  const file = $('#free-file').files[0];
-  if (!file) return;
-  $('#free-upload-btn').disabled = true;
-  await uploadTake(file, file.name, $('#free-diarize').checked, $('#file-denoise').value);
-  $('#free-upload-btn').disabled = false;
+  const chosen = importFiles.filter((e) => e.selected);
+  if (!chosen.length) return;
+  const button = $('#free-upload-btn');
+  button.disabled = true;
+  const diarize = $('#free-diarize').checked;
+  const denoise = $('#file-denoise').value;
+  let failed = 0;
+  for (const [i, entry] of chosen.entries()) {
+    const label = chosen.length > 1 ? `${i + 1} of ${chosen.length}: ${entry.path}` : entry.path;
+    const ok = await uploadTake(entry.file, entry.file.name, diarize, denoise, entry.path, label);
+    if (ok) entry.selected = false; else failed += 1;
+    renderImportList();
+    button.disabled = true;
+  }
+  importFiles = importFiles.filter((e) => e.selected);  // keep the failed ones to retry
+  renderImportList();
   $('#free-file').value = '';
+  $('#free-folder').value = '';
+  $('#free-upload-status').textContent = failed
+    ? `${failed} file${failed === 1 ? '' : 's'} could not be imported (still listed above to retry).`
+    : (chosen.length > 1 ? `All ${chosen.length} files uploaded. They're processed one at a time, below.` : '');
 });
 
-function uploadTake(blob, filename, diarize, denoise) {
+function uploadTake(blob, filename, diarize, denoise, originalName = '', label = '') {
   const form = new FormData();
   form.set('audio', blob, filename);
   form.set('denoise', denoise);
   form.set('diarize', diarize ? 'true' : 'false');
   form.set('mic', micLabel || '');
+  form.set('original_name', originalName);
   const status = $('#free-upload-status');
+  const what = label ? `Uploading ${label}` : 'Uploading';
+  status.textContent = label ? `${what}…` : '';
   // XHR (not fetch) for upload progress: a movie can take a while to send
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', voiceUrl('/freeform'));
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && e.total > 5e6) {
-        status.textContent = `Uploading… ${Math.round((e.loaded / e.total) * 100)}% of ${Math.round(e.total / 1e6)} MB`;
+        status.textContent = `${what}… ${Math.round((e.loaded / e.total) * 100)}% of ${formatSize(e.total)}`;
       }
     };
     xhr.onload = async () => {
       status.textContent = '';
+      let ok = true;
       if (xhr.status >= 400) {
+        ok = false;
         const message = await SMT.errorMessage(new Response(xhr.responseText, { status: xhr.status, statusText: xhr.statusText }));
-        SMT.showError(`Could not transcribe: ${message}`);
+        SMT.showError(`Could not import ${originalName || filename}: ${message}`);
       }
       loadTakes();
-      resolve();
+      resolve(ok);
     };
     xhr.onerror = () => {
       status.textContent = '';
-      SMT.showError('Upload failed: the connection dropped. Check your network, and your reverse proxy’s upload size limit and timeouts.');
-      resolve();
+      SMT.showError(`Upload of ${originalName || filename} failed: the connection dropped. Check your network, and your reverse proxy’s upload size limit and timeouts.`);
+      resolve(false);
     };
     xhr.send(form);
   });
+}
+
+// ---- People recognised across files ------------------------------------------
+
+let people = { people: [], target: null };
+let lastTakes = [];
+
+const personById = (id) => people.people.find((p) => p.id === id);
+
+function displayName(speaker) {
+  const person = speaker.person && personById(speaker.person);
+  return person ? person.name : speakerName(speaker.id);
+}
+
+async function loadPeople() {
+  try {
+    people = await api(voiceUrl('/speakers'));
+  } catch (err) {
+    people = { people: [], target: null };
+  }
+  renderPeople();
+}
+
+async function updatePerson(person, change) {
+  try {
+    people = await api(voiceUrl(`/speakers/${person.id}`), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change),
+    });
+  } catch (err) {
+    SMT.showError(err.message);
+    return;
+  }
+  if ('target' in change) selectTargetEverywhere();
+  refreshTakeCards();
+}
+
+function selectTargetEverywhere() {
+  // "This is the voice": pick that person in every take that has them
+  for (const take of lastTakes) {
+    if (!take.speakers || !takeEdits[take.id]) continue;
+    const ids = take.speakers.filter((s) => s.person && s.person === people.target).map((s) => s.id);
+    if (people.target) takeEdits[take.id].speakers = new Set(ids);
+  }
+}
+
+function refreshTakeCards() {
+  renderPeople();
+  Object.keys(renderedTakes).forEach((id) => { if (renderedTakes[id] === 'done') delete renderedTakes[id]; });
+  loadTakes();
+}
+
+function targetClips() {
+  // Kept clips of the chosen person in every finished take (respecting edits)
+  const out = [];
+  for (const take of lastTakes) {
+    if (take.state !== 'done' || !take.speakers) continue;
+    const edits = takeEditsFor(take);
+    const mine = new Set(take.speakers.filter((s) => s.person === people.target).map((s) => s.id));
+    const clips = take.segments
+      .map((segment, i) => ({ index: i, text: (edits.clips[i]?.text ?? segment.text).trim(), keep: edits.clips[i]?.keep !== false, speaker: segment.speaker }))
+      .filter((c) => mine.has(c.speaker) && c.keep && c.text);
+    if (clips.length) out.push({ take, clips });
+  }
+  return out;
+}
+
+function renderPeople() {
+  const box = $('#people-panel');
+  box.innerHTML = '';
+  const list = people.people.filter((p) => p.takes.length);
+  show(box, list.length > 0);
+  if (!list.length) return;
+
+  const multi = lastTakes.filter((t) => t.speakers).length > 1;
+  box.append(el('div', { className: 'people-head' },
+    el('strong', { textContent: 'People in your files' }),
+    el('span', {
+      className: 'hint',
+      textContent: multi ? 'Recognised across files by their voice. Name them, and mark the one you want.' : 'Name them, and mark the one you want: they’re recognised in the next files you import.',
+    })));
+  const grid = el('div', { className: 'people' });
+  const sorted = [...list].sort((a, b) => (b.id === people.target) - (a.id === people.target) || b.seconds - a.seconds);
+  for (const person of sorted) {
+    const isTarget = person.id === people.target;
+    const card = el('div', { className: `person${isTarget ? ' selected' : ''}` });
+    const name = el('strong', { textContent: person.name, title: 'Rename' });
+    const rename = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '✏️', title: 'Rename' });
+    rename.addEventListener('click', () => {
+      const value = window.prompt('Name this person', person.name);  // "prompt" is the sentence being read
+      if (value !== null && value.trim()) updatePerson(person, { name: value });
+    });
+    card.append(el('div', { className: 'speaker-head' }, name, rename));
+    card.append(el('small', {
+      className: 'hint',
+      textContent: `${clock(person.seconds)} of speech · in ${person.takes.length} file${person.takes.length === 1 ? '' : 's'}`,
+    }));
+    const actions = el('div', { className: 'samples' });
+    const sampleTake = person.sample && lastTakes.find((t) => t.id === person.sample.take && t.state === 'done');
+    if (sampleTake) {
+      const play = el('button', { type: 'button', className: 'btn btn--secondary', textContent: '▶' });
+      play.addEventListener('click', () => playClip(sampleTake, person.sample.index, play));
+      actions.append(play);
+    }
+    const pick = el('button', {
+      type: 'button', className: `btn ${isTarget ? 'btn--primary' : 'btn--secondary'}`,
+      textContent: isTarget ? '✓ The voice I want' : 'This is the voice',
+    });
+    pick.addEventListener('click', () => updatePerson(person, { target: !isTarget }));
+    actions.append(pick);
+    const others = people.people.filter((p) => p.id !== person.id);
+    if (others.length) {
+      const merge = el('select', { title: 'The same person was found twice? Merge them.' },
+        new Option('Same as…', ''), ...others.map((p) => new Option(p.name, p.id)));
+      merge.addEventListener('change', async () => {
+        const into = personById(merge.value);
+        if (!into || !confirm(`Merge “${person.name}” into “${into.name}”? They'll be treated as one person in every file.`)) {
+          merge.value = '';
+          return;
+        }
+        try {
+          people = await postJson(voiceUrl(`/speakers/${person.id}/merge`), { into: into.id });
+        } catch (err) {
+          SMT.showError(err.message);
+          return;
+        }
+        // Takes' speakers now point at the merged person
+        lastTakes.forEach((t) => (t.speakers || []).forEach((s) => { if (s.person === person.id) s.person = into.id; }));
+        selectTargetEverywhere();
+        refreshTakeCards();
+      });
+      actions.append(merge);
+    }
+    card.append(actions);
+    grid.append(card);
+  }
+  box.append(grid);
+
+  const target = personById(people.target);
+  if (target) {
+    const batches = targetClips();
+    const total = batches.reduce((sum, b) => sum + b.clips.length, 0);
+    if (total) {
+      const saveAll = el('button', {
+        type: 'button', className: 'btn btn--primary',
+        textContent: `✓ Save ${target.name}'s ${total} clips from ${batches.length} file${batches.length === 1 ? '' : 's'} to the dataset`,
+      });
+      saveAll.addEventListener('click', async () => {
+        if (!confirm(`Save ${total} clips of ${target.name} from ${batches.length} files? Unticked clips stay out, and the other people's clips are discarded with those files' reviews.`)) return;
+        saveAll.disabled = true;
+        let saved = 0;
+        for (const [i, batch] of batches.entries()) {
+          saveAll.textContent = `Saving file ${i + 1} of ${batches.length}…`;
+          try {
+            const result = await postJson(voiceUrl(`/freeform/${batch.take.id}/save`), {
+              clips: batch.clips.map(({ index, text }) => ({ index, text })),
+            });
+            saved += result.saved;
+            delete takeEdits[batch.take.id];
+            updateRecorded(result.recorded);
+          } catch (err) {
+            SMT.showError(`${batch.take.name || batch.take.id}: ${err.message}`);
+          }
+        }
+        $('#free-upload-status').textContent = `Added ${saved} clips of ${target.name} to the dataset.`;
+        loadTakes();
+      });
+      box.append(el('div', { className: 'take-foot' },
+        el('span', { className: 'hint', textContent: 'Review the clips in each file below first; your edits and unticks are kept.' }), saveAll));
+    }
+  }
 }
 
 async function loadTakes() {
@@ -556,6 +838,8 @@ async function loadTakes() {
     return;
   }
   if (!voice || voice.name !== name) return;
+  lastTakes = takes;
+  if (takes.some((t) => t.speakers)) await loadPeople(); else { people = { people: [], target: null }; renderPeople(); }
 
   const box = $('#free-takes');
   const ids = new Set(takes.map((t) => t.id));
@@ -606,7 +890,9 @@ $('#train-pending-btn').addEventListener('click', goToReview);
 
 function takeTitle(take) {
   const m = take.id.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/);
-  const parts = [`Take ${m ? `${m[2]}/${m[3]} ${m[4]}:${m[5]}` : take.id}`];
+  const when = m ? `${m[2]}/${m[3]} ${m[4]}:${m[5]}` : take.id;
+  const imported = take.name && !/^take\.(webm|ogg|m4a)$/.test(take.name);
+  const parts = [imported ? take.name : `Take ${when}`];
   if (take.duration) parts.push(clock(take.duration));
   if (take.tracks && take.tracks.length > 1 && take.state !== 'choose_track') {
     parts.push(trackLabel(take.tracks[take.track]));
@@ -637,10 +923,16 @@ function takeEditsFor(take) {
   let edits = takeEdits[take.id];
   if (!edits) {
     edits = { clips: {}, speakers: new Set() };
-    // Preselect the speaker who sounds like this voice's existing recordings
-    const best = (take.speakers || []).filter((s) => s.similarity !== null)
-      .sort((a, b) => b.similarity - a.similarity)[0];
-    if (best && best.similarity >= SUGGEST_SIMILARITY) edits.speakers.add(best.id);
+    const target = (take.speakers || []).filter((s) => s.person && s.person === people.target);
+    if (target.length) {
+      // "The voice I want", recognised in this file
+      target.forEach((s) => edits.speakers.add(s.id));
+    } else {
+      // Otherwise the speaker who sounds like this voice's existing recordings
+      const best = (take.speakers || []).filter((s) => s.similarity !== null)
+        .sort((a, b) => b.similarity - a.similarity)[0];
+      if (best && best.similarity >= SUGGEST_SIMILARITY) edits.speakers.add(best.id);
+    }
     takeEdits[take.id] = edits;
   }
   return edits;
@@ -730,7 +1022,14 @@ function renderTake(take) {
     for (const speaker of take.speakers) {
       const chosen = edits.speakers.has(speaker.id);
       const card = el('div', { className: `speaker${chosen ? ' selected' : ''}` });
-      const head2 = el('div', { className: 'speaker-head' }, el('strong', { textContent: speakerName(speaker.id) }));
+      const head2 = el('div', { className: 'speaker-head' }, el('strong', { textContent: displayName(speaker) }));
+      const person = speaker.person && personById(speaker.person);
+      if (person && person.id === people.target) {
+        head2.append(el('span', { className: 'pill pill--ok', textContent: 'The voice I want' }));
+      } else if (person && person.takes.length > 1) {
+        const others = person.takes.length - 1;
+        head2.append(el('span', { className: 'pill', textContent: `also in ${others} other file${others === 1 ? '' : 's'}` }));
+      }
       if (speaker.similarity !== null) {
         const like = speaker.similarity === bestSimilarity && speaker.similarity >= SUGGEST_SIMILARITY;
         head2.append(el('span', {
@@ -813,7 +1112,7 @@ function renderTake(take) {
       delete takeEdits[take.id];
       updateRecorded(result.recorded);
       box.replaceWith(el('div', { className: 'banner banner--success', textContent: `Added ${result.saved} clips to the dataset.` }));
-      loadTakes();  // refresh the "waiting for review" counts
+      loadTakes();  // refresh the "waiting for review" counts and the people
     } catch (err) {
       SMT.showError(err.message);
       updateSave();

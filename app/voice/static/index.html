@@ -114,11 +114,16 @@
       </div>
 
       <div id="file-mode" class="mode-panel hidden">
-        <p class="hint">Audio or video: a voice memo, podcast, interview or movie (MP4, MKV, AVI, MOV, WMV, MP3, WAV, FLAC… up to 8 GB). For videos only the sound is used. It's transcribed and cut into clips for you to check. Only use recordings of people who agreed to have their voice cloned.</p>
+        <p class="hint">Audio or video: voice memos, podcasts, interviews, a whole series of episodes (MP4, MKV, AVI, MOV, WMV, MP3, WAV, FLAC… up to 8 GB each). Pick files, a whole folder with its subfolders, or drag them here. For videos only the sound is used. Each file is transcribed and cut into clips for you to check. Only use recordings of people who agreed to have their voice cloned.</p>
         <div class="row">
-          <input type="file" id="free-file" class="grow"
+          <input type="file" id="free-file" class="grow" multiple
                  accept="audio/*,video/*,.mkv,.mp4,.m4v,.avi,.mov,.wmv,.flv,.webm,.ts,.m2ts,.mts,.mpg,.mpeg,.vob,.3gp,.ogv,.mp3,.wav,.flac,.ogg,.opus,.m4a,.m4b,.aac,.ac3,.eac3,.dts,.wma,.aiff,.aif" />
-          <button id="free-upload-btn" class="btn btn--primary">Import</button>
+          <button type="button" id="free-folder-btn" class="btn btn--secondary">📁 Choose folder</button>
+          <input type="file" id="free-folder" class="hidden" webkitdirectory directory multiple />
+        </div>
+        <div id="import-list" class="import-list hidden"></div>
+        <div class="row">
+          <button id="free-upload-btn" class="btn btn--primary" disabled>Import</button>
         </div>
         <div class="row">
           <label class="inline-select">Background noise
@@ -143,6 +148,7 @@
       </div>
 
       <div id="takes-block" class="mode-panel hidden">
+        <div id="people-panel" class="people-panel hidden"></div>
         <div id="free-takes" class="free-takes"></div>
         <audio id="clip-audio" class="hidden"></audio>
       </div>

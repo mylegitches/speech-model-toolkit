@@ -94,12 +94,17 @@ Pause briefly between sentences: it helps the app cut clean clips.
 
 ### Import file
 
-Use recordings you already have: a voice memo, podcast, interview or movie. Audio or video up to 8 GB (MP4, MKV, AVI, MOV, WMV, MP3, WAV, FLAC and more). For videos only the sound is used.
+Use recordings you already have: voice memos, podcasts, interviews, movies or a whole series of episodes. Audio or video up to 8 GB per file (MP4, MKV, AVI, MOV, WMV, MP3, WAV, FLAC and more). For videos only the sound is used.
 
-1. Choose the file.
+1. Choose what to import:
+   - **Files**: select one or several.
+   - **📁 Choose folder**: a whole folder, including everything in its subfolders.
+   - Or **drag** files or folders onto the Import tab.
+
+   A list shows the audio and video files found (subtitles, images and other files are skipped), with their sizes. Untick any you don't want.
 2. Choose **Background noise**. For videos it switches to *Remove* automatically (it also removes music and effects).
 3. If several people talk in it, tick **Several people are talking**. This is ticked automatically for videos.
-4. Click **Import**. For big files an upload percentage appears.
+4. Click **Import** (or **Import N files**). The files upload one after another with a percentage, then are processed one at a time; the others show *Waiting for the other files to finish…*.
 5. **If the file has several audio tracks** (for example English, Spanish and a director's commentary), you're asked which one to use. The one in the voice's language is preselected.
    - For surround sound (5.1/7.1), **Dialogue only** is on by default: it uses just the center channel, where movie dialogue is, leaving most music and effects out.
 6. **If several people talk**, the review starts with **Who do you want?**: one card per person, with how long they talk, three ▶ samples and a quote.
@@ -107,6 +112,17 @@ Use recordings you already have: a voice memo, podcast, interview or movie. Audi
    - If the voice already has recordings, the person who sounds most like them is marked **Sounds like you** and already selected.
    - If one person was split into two cards (shouting vs whispering, phone vs studio), select both.
 7. **Review the clips** (see below).
+
+#### A series of videos with the same people
+
+Every file is compared with the people found in your earlier files, so the same person keeps the same name everywhere: their card in each file says *also in N other files*. Above the takes, **People in your files** lists everyone found so far:
+
+- **✏️** renames a person (e.g. "Jerry"). The name then shows in every file.
+- **This is the voice** marks the person you want. They're preselected in every file already imported and every file you import later.
+- **Same as…** merges two entries that are really one person.
+- **▶** plays one of their clips.
+
+Once the person you want is marked, review the clips of each file, then use **✓ Save *name*'s clips from all files** to add all of them to the dataset at once. Unticked clips stay out.
 
 > Only use recordings of people who agreed to have their voice cloned.
 
@@ -249,7 +265,8 @@ docker compose logs -f toolkit
 | **Wake word triggers too often / too rarely** | Adjust **Wake word sensitivity** in Settings → Audio, or retrain with a longer phrase. |
 | **The voice sounds robotic** | Add more clips (300+), check transcripts are exact, train longer. |
 | **Wrong language picked from a movie** | Discard the take and import again; choose the right track when asked. |
-| **Two cards for the same person** | Select both with **Use this voice**. |
+| **Two cards for the same person** | In one file: select both with **Use this voice**. Across files: in **People in your files**, use **Same as…** to merge them. |
+| **Folder import doesn't offer a folder button / drag and drop** | Use a desktop browser (Chrome, Edge, Firefox, Safari); phones can only pick single files. |
 | **"This file has no audio track"** | The file only has video; use another copy. |
 
 **Nginx Proxy Manager:** edit the proxy host → **Details**: switch on *Websockets Support* → **Advanced**, add:
