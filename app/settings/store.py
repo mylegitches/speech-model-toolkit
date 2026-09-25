@@ -42,6 +42,14 @@ DEFAULTS: Dict[str, Any] = {
         "silenceMs": 900,
         "maxSeconds": 15,
     },
+    "identify": {
+        # Name the people found in imported files with the active AI connection
+        "enabled": False,
+        "webSearch": True,     # let the AI search the web, where the provider can
+        "castLookup": True,    # look up the show's cast on TVmaze (IMDb ID or folder name)
+        "autoName": False,     # rename untouched "Person N" cards when the AI is sure
+        "autoMerge": False,    # merge cards the AI is sure are one character (voices alike)
+    },
     "audio": {
         "threshold": 0.5,
         "cooldownSec": 2.0,
@@ -163,7 +171,7 @@ def update(values: Dict[str, Any]) -> Dict[str, Any]:
                 connections.append(_clean_connection(new, existing))
             current["connections"] = connections
 
-        for section in ("assistant", "speech", "audio"):
+        for section in ("assistant", "speech", "identify", "audio"):
             if isinstance(values.get(section), dict):
                 current[section].update(
                     {

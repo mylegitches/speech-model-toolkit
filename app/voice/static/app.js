@@ -660,6 +660,12 @@ function uploadTake(blob, filename, diarize, denoise, originalName = '', label =
 // ---- People recognised across files ------------------------------------------
 
 let people = { people: [], target: null };
+let peopleTimer = null;
+
+/** Keep the AI status from GET speakers when an update returns only the people. */
+function setPeople(data) {
+  people = { ...data, identify: data.identify || people.identify };
+}
 let lastTakes = [];
 const peopleUi = { showAll: false, filter: '', selected: new Set() };
 const PEOPLE_SHOWN = 12;  // more than this: the rest behind "Show all"
@@ -677,6 +683,9 @@ async function loadPeople() {
   } catch (err) {
     people = { people: [], target: null };
   }
+  // Poll while the AI is identifying people
+  clearTimeout(peopleTimer);
+  if (people.identify?.running) peopleTimer = setTimeout(() => { if (voice) loadPeople(); }, 3000);
   const ids = new Set(people.people.map((p) => p.id));
   peopleUi.selected.forEach((id) => { if (!ids.has(id)) peopleUi.selected.delete(id); });
   renderPeople();
@@ -684,9 +693,9 @@ async function loadPeople() {
 
 async function updatePerson(person, change) {
   try {
-    people = await api(voiceUrl(`/speakers/${person.id}`), {
+    setPeople(await api(voiceUrl(`/speakers/${person.id}`), {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change),
-    });
+    }));
   } catch (err) {
     SMT.showError(err.message);
     return;
@@ -709,7 +718,7 @@ async function updatePerson(person, change) {
 async function mergePeople(fromIds, intoId) {
   for (const id of fromIds.filter((x) => x !== intoId)) {
     try {
-      people = await postJson(voiceUrl(`/speakers/${id}/merge`), { into: intoId });
+      setPeople(await postJson(voiceUrl(`/speakers/${id}/merge`), { into: intoId }));
     } catch (err) {
       SMT.showError(err.message);
       break;
@@ -723,7 +732,7 @@ async function mergePeople(fromIds, intoId) {
 
 async function dismissSimilar(person, otherId) {
   try {
-    people = await postJson(voiceUrl(`/speakers/${person.id}/not-same`), { other: otherId });
+    setPeople(await postJson(voiceUrl(`/speakers/${person.id}/not-same`), { other: otherId }));
   } catch (err) {
     SMT.showError(err.message);
     return;
@@ -809,6 +818,7 @@ function personCard(person) {
     className: 'hint',
     textContent: `${clock(person.seconds)} of speech · in ${person.takes.length} file${person.takes.length === 1 ? '' : 's'}`,
   }));
+  if (person.ai) card.append(aiLine(person));
 
   const actions = el('div', { className: 'samples' });
   const sampleTake = person.sample && lastTakes.find((t) => t.id === person.sample.take && t.state === 'done');
@@ -844,7 +854,11 @@ function personCard(person) {
     const other = personById(hint.id);
     if (!other) continue;
     const row = el('div', { className: 'maybe-same' });
-    row.append(el('span', { textContent: `Maybe the same as ${other.name} (${Math.round(hint.score * 100)}%)` }));
+    row.append(el('span', {
+      textContent: hint.reason
+        ? `Maybe the same as ${other.name}: ${hint.reason}`
+        : `Maybe the same as ${other.name} (${Math.round(hint.score * 100)}%)`,
+    }));
     const otherTake = other.sample && lastTakes.find((t) => t.id === other.sample.take && t.state === 'done');
     if (otherTake) {
       const play = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '▶', title: `Hear ${other.name}` });
@@ -866,6 +880,60 @@ function personCard(person) {
   return card;
 }
 
+function aiLine(person) {
+  const ai = person.ai;
+  const row = el('div', { className: `ai-line ai-${ai.confidence}` });
+  if (!ai.name) {
+    row.append(el('span', { textContent: 'AI: not sure who this is' }));
+  } else if (ai.name.toLowerCase() === 'mixed') {
+    row.append(el('span', { textContent: 'AI: lines from several people' }));
+  } else {
+    row.append(el('span', { textContent: `AI: ${ai.name}${ai.actor ? ` (${ai.actor})` : ''} · ${ai.confidence}` }));
+    if (ai.name !== person.name) {
+      const use = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Use this name' });
+      use.addEventListener('click', () => updatePerson(person, { name: ai.name.slice(0, 40) }));
+      row.append(use);
+    }
+  }
+  row.title = ai.reason || '';
+  return row;
+}
+
+function identifyBar() {
+  const info = people.identify || {};
+  const bar = el('div', { className: 'identify-bar' });
+  if (!info.enabled || !info.connected) {
+    bar.append(el('span', { className: 'hint' }, 'Let AI name these people (e.g. the characters of a series): ',
+      el('a', { href: '../#settings', target: '_top', textContent: info.connected ? 'turn on Speaker identification in Settings' : 'add an AI connection and turn on Speaker identification in Settings' })));
+    return bar;
+  }
+  const running = info.running || people.ai?.state === 'running';
+  const go = el('button', {
+    type: 'button', className: 'btn btn--secondary', disabled: running,
+    textContent: running ? 'Identifying…' : '🔎 Identify with AI',
+    title: 'Ask the AI who the people not identified yet are (Shift-click: everyone again)',
+  });
+  go.addEventListener('click', async (e) => {
+    go.disabled = true;
+    try {
+      setPeople(await postJson(voiceUrl('/speakers/identify'), { everyone: e.shiftKey }));
+    } catch (err) {
+      SMT.showError(err.message);
+    }
+    loadPeople();
+  });
+  bar.append(go);
+  const ai = people.ai || {};
+  const bits = [info.provider && `with ${info.provider}`, info.webSearch && 'web search on',
+    ai.cast && `cast: ${ai.cast}`].filter(Boolean);
+  let text = bits.join(' · ');
+  if (running) text = `Asking the AI… ${text}`;
+  else if (ai.state === 'error') text = `Last try failed: ${ai.error}`;
+  else if (ai.at) text = `${text}${text ? ' · ' : ''}last run ${new Date(ai.at * 1000).toLocaleTimeString()}`;
+  bar.append(el('span', { className: `hint${ai.state === 'error' && !running ? ' bad' : ''}`, textContent: text }));
+  return bar;
+}
+
 function renderPeople() {
   const box = $('#people-panel');
   box.innerHTML = '';
@@ -883,6 +951,7 @@ function renderPeople() {
         + 'Click a name to rename. Mark the voice you want'
         + (suggestions ? '; “Maybe the same as” flags people who may have been split in two.' : '.'),
     })));
+  box.append(identifyBar());
 
   // Tools for long lists: search, and merging several at once
   const tools = el('div', { className: 'people-tools' });

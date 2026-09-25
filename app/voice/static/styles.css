@@ -146,6 +146,15 @@
 .maybe-same span { flex: 1; min-width: 8rem; }
 .maybe-same .btn { padding: 0.2rem 0.5rem; font-size: 0.78rem; min-height: 0; }
 
+.identify-bar { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.identify-bar .hint { flex: 1; min-width: 12rem; }
+.identify-bar .bad { color: #fca5a5; }
+.ai-line { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; font-size: 0.8rem; color: var(--accent-text);
+  background: var(--accent-soft); border-radius: 6px; padding: 0.25rem 0.45rem; }
+.ai-line span { flex: 1; min-width: 8rem; }
+.ai-line.ai-low { color: var(--muted); background: var(--surface-2); }
+.ai-line .btn { padding: 0.15rem 0.45rem; font-size: 0.76rem; min-height: 0; }
+
 /* Audio track chooser */
 .tracks { display: flex; flex-direction: column; gap: 0.6rem; }
 .track-list { display: flex; flex-direction: column; gap: 0.35rem; }

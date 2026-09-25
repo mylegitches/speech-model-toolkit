@@ -71,6 +71,7 @@ The app is one page with five tabs: **Home, Wake Word, Voice, Test Lab, Settings
   - **Surround sound (5.1/7.1):** only the **center channel** is used by default. That's where film dialogue is mixed, away from the music and effects.
   - **Speaker detection (diarization):** for interviews, podcasts and movies, every clip is assigned to a speaker. A **"Who do you want?"** screen shows one card per speaker with talk time, three playable samples and a quote. Pick one and only their clips are kept. If the voice already has recordings, the speaker who sounds most like them is **marked and preselected**.
   - **People recognised across files:** for a series of episodes with recurring people, every speaker is matched against the people found in earlier files by voice fingerprint, so the same person keeps the same card and name everywhere ("also in 3 other files"). Click a name to rename, merge duplicates (likely duplicates are suggested, and several can be merged at once), search long cast lists, and mark **This is the voice** to preselect that person in every file and **save their clips from all files at once**.
+  - **AI speaker identification:** import a whole series (every season, every episode) and the AI names the characters. It reads a few transcribed lines per person, gets the cast from TVmaze (via an IMDb ID in the file names or the show's folder name) and can search the web (OpenRouter, Perplexity, Gemini, Anthropic, OpenAI). Cards show *AI: Tony Soprano (James Gandolfini) · high*; "Person N" cards can be named automatically, and cards the AI says are the same character are merged when their voices agree, so the series ends up as **one card per character**.
   - **Prepared datasets** (LJSpeech-style `metadata.csv` or audio + `.txt` pairs) can be imported as a zip.
 - **Review before anything is added:** every automatically cut clip can be played, its transcript corrected, and unticked if it has mistakes, music or other voices.
 - **Background noise removal** per take, switchable while reviewing (the original audio is always kept):
@@ -109,6 +110,7 @@ The app is one page with five tabs: **Home, Wake Word, Voice, Test Lab, Settings
   - **Test connection** checks the key and sends a real test prompt, reporting latency.
   - API keys are stored only on your server and **never sent back to the browser** (masked as `sk-…abcd`).
 - **Assistant:** system prompt (tuned for short, speakable answers), temperature, max tokens, and the fixed reply text.
+- **Speaker identification (AI):** on/off, TVmaze cast lookup, web search, automatic naming and automatic merging.
 - **Speech recognition:** Whisper model size (tiny → medium, English-only or multilingual), language, end-of-speech silence, maximum question length, and download status.
 - **Audio:**
   - microphone with live level test
@@ -202,7 +204,8 @@ One Docker container · FastAPI server (Python)
 7. **A real-time voice loop in the browser.** AudioWorklet captures 16 kHz PCM → WebSocket → wake word scoring every 80 ms → VAD end-of-speech → Whisper → LLM → Piper → playback, with the microphone muted during playback to prevent self-triggering.
 8. **Mobile audio quirks handled.** On iOS, AudioContexts are created and audio elements unlocked inside the tap, because sound that arrives later (AI replies) would otherwise be silently blocked. Wake Lock keeps listening sessions alive.
 9. **Security by default.** API keys stay server-side (masked, `chmod 600`). Paths are stripped from error messages. Uploads stream to disk (8 GB files never sit in memory). A `no-cache` revalidation policy stops updated containers from mixing new pages with stale cached scripts.
-10. **Operational polish.** Resumable downloads, structured logs, plain-English error explanations for failed steps, and a test suite for the parts that talk to external APIs.
+10. **AI identifies the characters of a series.** Voice fingerprints alone split one character into several cards (shouting vs. calm, a cold) and can't tell you names. The toolkit sends each person's transcribed lines, the file names and the real cast list (TVmaze, found via the IMDb ID or show folder) to any of 17 LLM providers, with provider-native web search where available (Anthropic's web search tool, Gemini's Google Search grounding, OpenRouter `:online`, Perplexity). Its answers name the cards and drive merging, but a merge also needs the voices to agree, so a wrong guess becomes a suggestion rather than a silent mistake.
+11. **Operational polish.** Resumable downloads, structured logs, plain-English error explanations for failed steps, and a test suite for the parts that talk to external APIs.
 
 ---
 
@@ -269,6 +272,7 @@ Open the app over HTTPS, choose Add to Home Screen, then record dataset sentence
 ## Honest limitations
 
 - Voice training on a CPU is very slow (days for a good voice); a GPU is recommended.
+- AI speaker identification is only as good as the model and the lines it sees; well-known shows work best, and the user's own names always win.
 - Speaker detection doesn't separate people talking over each other. Those clips should be unticked during review.
 - Auto-detect scores come from each pretrained voice's short official sample, so treat the ranking as a strong hint and listen to the top candidates.
 - The wake word pipeline generates English-pronounced samples (Piper's multi-speaker English model).

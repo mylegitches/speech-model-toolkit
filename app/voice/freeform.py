@@ -37,6 +37,7 @@ import numpy as np
 from ..errors import explain_failure, friendly_ffmpeg_error
 from ..lab import stt
 from ..settings import store as settings_store
+from . import identify
 from . import speakers as people
 from .voices import Voice
 
@@ -445,6 +446,8 @@ def _begin(voice: Voice, take_dir: Path, take: Dict[str, Any]) -> Dict[str, Any]
                         people.link(voice, take_id, take)
                     except Exception:  # matching across files is a bonus, never fatal
                         _LOGGER.exception("Matching the speakers of %s/%s to known people failed", voice.name, take_id)
+                    else:
+                        identify.after_take(voice)  # name the new people with AI, if enabled
             take.update(state="done", detail="")
             _LOGGER.info("Freeform take %s/%s done in %.0fs: %.0fs of audio, %d clips%s",
                          voice.name, take_id, time.monotonic() - started, take["duration"] or 0,

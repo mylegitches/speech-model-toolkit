@@ -124,6 +124,15 @@ Every file is compared with the people found in your earlier files, so the same 
 - With many people, **Find a person…** searches by name, and people with little speech are behind **Show all**.
 - **▶** plays one of their clips.
 
+**Let AI name them (optional).** With an AI connection and **Speaker identification** turned on in Settings, the AI reads a few lines each person said and works out who they are, for a whole series too:
+
+- It looks up the cast on TVmaze. Put the show in a folder named after it (`The Sopranos/Season 1/S01E01.mkv`), or include the IMDb ID in a file name (`… tt0141842.mkv`). Folders like *Season 1* or *Disc 2* are ignored.
+- With **web search** on and a provider that supports it (OpenRouter, Perplexity, Gemini, Anthropic, OpenAI search models), it can also look things up online.
+- Each card then shows its answer, e.g. *AI: Carmela Soprano (Edie Falco) · high*; hover for the reason, and **Use this name** to accept it.
+- With **Name cards automatically**, "Person N" cards get the name when the AI is sure. Names you typed are never changed.
+- With **Merge cards automatically**, two cards the AI is sure are the same character are merged, but only if their voices are also somewhat alike. Otherwise they show up as *Maybe the same as …: AI thinks both are …* for you to decide.
+- It runs after every imported file. **🔎 Identify with AI** asks about the people it hasn't identified yet; Shift-click asks about everyone again.
+
 Once the person you want is marked, review the clips of each file, then use **✓ Save *name*'s clips from all files** to add all of them to the dataset at once. Unticked clips stay out.
 
 > Only use recordings of people who agreed to have their voice cloned.
@@ -218,6 +227,18 @@ Keys are stored only on your server and are never shown again (you'll see `sk-�
 - The **system prompt**: by default it asks for short answers that sound good spoken aloud
 - Temperature and maximum reply length
 - The fixed reply text
+
+### Speaker identification (AI)
+
+For imported files (see *A series of videos with the same people*). Needs an active AI connection.
+
+- **Identify speakers with AI**: on/off.
+- **Look up the cast on TVmaze**: from an IMDb ID in the file names or the show's folder name.
+- **Let the AI search the web**, where the provider supports it.
+- **Name "Person N" cards automatically** when the AI is sure.
+- **Merge cards automatically** when the AI is sure they're the same character and their voices are alike.
+
+File names and a few transcribed lines per person are sent to your AI provider, and the show name or IMDb ID to TVmaze.
 
 ### Speech recognition
 

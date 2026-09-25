@@ -2,7 +2,10 @@
 
 voices/<name>/speakers.json:
   {"people": [{"id": "p1", "name": "Person 1", "centroid": [...], "seconds": 123.4,
-               "takes": ["<take id>", ...], "sample": {"take": id, "index": n} | null}],
+               "takes": ["<take id>", ...], "sample": {"take": id, "index": n} | null,
+               "lines": [{"text", "file"}, ...],   # a few of their lines, for AI naming
+               "ai": {"name", "actor", "confidence", "reason", "lines", "at"} | absent}],
+   "ai": {"state", "error", "at", "identified", "cast"},   # last AI identification run
    "target": "p1" | null,   # "This is the voice": preselected in every take
    "notSame": [["p1", "p4"], ...]}   # suggestions the user said are different people
 
@@ -30,6 +33,9 @@ SAME_PERSON = 0.5
 
 Fingerprints of one person from different recordings typically score 0.6-0.9,
 different people below 0.35."""
+
+MAX_LINES = 16
+"""Lines kept per person (the longest from each file) for identification."""
 
 MAYBE_SAME = 0.4
 """Similarity above which two people are suggested as possibly the same.
@@ -73,10 +79,26 @@ def _suggestions(data: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
     scores = matrix @ matrix.T
     for i, a in enumerate(people):
         for j, b in enumerate(people):
-            if i != j and scores[i, j] >= MAYBE_SAME and frozenset((a["id"], b["id"])) not in dismissed:
-                out[a["id"]].append({"id": b["id"], "score": round(float(scores[i, j]), 3)})
-        out[a["id"]].sort(key=lambda s: -s["score"])
+            if i == j or frozenset((a["id"], b["id"])) in dismissed:
+                continue
+            same_character = ai_character(a) and ai_character(a) == ai_character(b)
+            if scores[i, j] >= MAYBE_SAME or same_character:
+                hint = {"id": b["id"], "score": round(float(scores[i, j]), 3)}
+                if same_character:
+                    hint["reason"] = f"AI thinks both are {a['ai']['name']}"
+                out[a["id"]].append(hint)
+        # AI-backed suggestions first, then by voice similarity
+        out[a["id"]].sort(key=lambda s: (-("reason" in s), -s["score"]))
     return out
+
+
+def ai_character(person: Dict[str, Any]) -> str:
+    """The character the AI named with at least medium confidence (normalised), or ""."""
+    ai = person.get("ai") or {}
+    name = (ai.get("name") or "").strip().lower()
+    if not name or name in ("mixed", "unknown") or ai.get("confidence") not in ("high", "medium"):
+        return ""
+    return " ".join(name.split())
 
 
 def public(voice: Voice) -> Dict[str, Any]:
@@ -85,6 +107,7 @@ def public(voice: Voice) -> Dict[str, Any]:
     similar = _suggestions(data)
     return {
         "target": data["target"],
+        "ai": data.get("ai"),
         "people": [
             {**{k: v for k, v in p.items() if k != "centroid"}, "similar": similar.get(p["id"], [])}
             for p in data["people"]
@@ -109,6 +132,18 @@ def not_same(voice: Voice, person_id: str, other_id: str) -> Dict[str, Any]:
 def _unit(vector: List[float]) -> np.ndarray:
     v = np.asarray(vector, dtype=np.float32)
     return v / (np.linalg.norm(v) + 1e-9)
+
+
+def _add_lines(person: Dict[str, Any], take: Dict[str, Any], speaker_id: int) -> None:
+    """Remember the speaker's longest lines in this take (newest files last)."""
+    texts = sorted(
+        {s["text"].strip() for s in take.get("segments", []) if s.get("speaker") == speaker_id and s.get("text")},
+        key=len, reverse=True,
+    )[:4]
+    name = take.get("name") or ""
+    lines = person.setdefault("lines", [])
+    lines.extend({"text": t[:240], "file": name} for t in texts)
+    del lines[:-MAX_LINES]
 
 
 def link(voice: Voice, take_id: str, take: Dict[str, Any]) -> None:
@@ -143,6 +178,7 @@ def link(voice: Voice, take_id: str, take: Dict[str, Any]) -> None:
                 person["takes"].append(take_id)
             if not person.get("sample") and speaker["samples"]:
                 person["sample"] = {"take": take_id, "index": speaker["samples"][0]}
+            _add_lines(person, take, speaker["id"])
             speaker.update(person=person["id"], personScore=round(score, 3), newPerson=False)
 
         for si, speaker in enumerate(speakers):
@@ -155,6 +191,7 @@ def link(voice: Voice, take_id: str, take: Dict[str, Any]) -> None:
                 "takes": [take_id],
                 "sample": {"take": take_id, "index": speaker["samples"][0]} if speaker["samples"] else None,
             }
+            _add_lines(person, take, speaker["id"])
             people.append(person)
             speaker.update(person=person["id"], personScore=None, newPerson=True)
 
@@ -201,6 +238,9 @@ def merge(voice: Voice, person_id: str, into_id: str, retag: Any) -> Dict[str, A
         target["seconds"] = round(source["seconds"] + target["seconds"], 1)
         target["takes"] = list(dict.fromkeys(target["takes"] + source["takes"]))
         target["sample"] = target.get("sample") or source.get("sample")
+        target["lines"] = (target.get("lines", []) + source.get("lines", []))[-MAX_LINES:]
+        if not target.get("ai") and source.get("ai"):
+            target["ai"] = source["ai"]
         data["people"] = [p for p in data["people"] if p["id"] != person_id]
         if data["target"] == person_id:
             data["target"] = into_id

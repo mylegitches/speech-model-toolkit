@@ -16,6 +16,11 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 TIMEOUT = httpx.Timeout(60.0, connect=10.0)
+SEARCH_TIMEOUT = httpx.Timeout(180.0, connect=10.0)  # web searches take a while
+
+# Anthropic server-side web search: the dynamic-filtering variant for current
+# models, the basic one for older models (tried if the first is rejected)
+_ANTHROPIC_SEARCH_TOOLS = ("web_search_20260209", "web_search_20250305")
 _LOGGER = logging.getLogger(__name__)
 ANTHROPIC_VERSION = "2023-06-01"
 
@@ -78,6 +83,27 @@ _BY_ID = {p.id: p for p in PROVIDERS}
 
 class ProviderError(Exception):
     """A short, user-facing error message."""
+
+
+def web_search_support(conn: Optional[Dict[str, Any]]) -> str:
+    """How a connection can search the web: a short description, or "" if it can't."""
+    if not conn:
+        return ""
+    provider = _BY_ID.get(conn.get("provider", ""))
+    model = (conn.get("model") or "").lower()
+    if provider is None:
+        return ""
+    if provider.id == "perplexity":
+        return "Perplexity always searches the web"
+    if provider.id == "openrouter":
+        return "OpenRouter web search (the model's :online variant)"
+    if provider.api == "gemini":
+        return "Google Search grounding"
+    if provider.api == "anthropic":
+        return "Anthropic web search tool"
+    if provider.id == "openai" and "search" in model:
+        return "OpenAI search model"
+    return ""
 
 
 def catalog() -> List[Dict[str, Any]]:
@@ -218,21 +244,28 @@ async def chat(
     temperature: float = 0.7,
     max_tokens: int = 300,
     client: Optional[httpx.AsyncClient] = None,
+    web_search: bool = False,
 ) -> str:
-    """Send a conversation ([{role: user|assistant, content}]) and return the reply text."""
+    """Send a conversation ([{role: user|assistant, content}]) and return the reply text.
+
+    web_search lets the model search the web where the provider supports it
+    (see web_search_support); elsewhere it's ignored."""
     provider = get_provider(conn.get("provider", ""))
     model = (conn.get("model") or "").strip()
     if not model:
         raise ProviderError("Choose a model")
+    search = web_search and bool(web_search_support(conn))
+    if search and provider.id == "openrouter" and not model.endswith(":online"):
+        model += ":online"
 
     base = _base(conn, provider)
     headers = _headers(conn, provider)
     owned = client is None
-    client = _client(client)
+    client = client or httpx.AsyncClient(timeout=SEARCH_TIMEOUT if search else TIMEOUT)
     started = time.monotonic()
     try:
         try:
-            reply = await _chat(client, provider, base, headers, model, messages, system, temperature, max_tokens)
+            reply = await _chat(client, provider, base, headers, model, messages, system, temperature, max_tokens, search)
             _LOGGER.info("AI %s/%s answered in %.1fs (%d chars)", provider.id, model, time.monotonic() - started, len(reply))
             return reply
         except ProviderError as err:
@@ -240,7 +273,7 @@ async def chat(
             # default temperature: retry once without setting it.
             if "temperature" in str(err).lower() and temperature is not None:
                 _LOGGER.info("AI %s/%s rejected the temperature; retrying without it", provider.id, model)
-                return await _chat(client, provider, base, headers, model, messages, system, None, max_tokens)
+                return await _chat(client, provider, base, headers, model, messages, system, None, max_tokens, search)
             _LOGGER.warning("AI %s/%s failed after %.1fs: %s", provider.id, model, time.monotonic() - started, err)
             raise
     finally:
@@ -258,15 +291,10 @@ async def _chat(
     system: str,
     temperature: Optional[float],
     max_tokens: int,
+    search: bool = False,
 ) -> str:
     if provider.api == "anthropic":
-        body: Dict[str, Any] = {"model": model, "max_tokens": max_tokens, "messages": messages}
-        if system:
-            body["system"] = system
-        if temperature is not None:
-            body["temperature"] = temperature
-        data = await _request(client, "POST", f"{base}/v1/messages", headers, body)
-        text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+        text = await _anthropic_chat(client, base, headers, model, messages, system, temperature, max_tokens, search)
 
     elif provider.api == "gemini":
         # Thinking models spend part of the output budget on reasoning
@@ -282,6 +310,8 @@ async def _chat(
         }
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}
+        if search:
+            body["tools"] = [{"google_search": {}}]
         data = await _request(client, "POST", f"{base}/v1beta/models/{model}:generateContent", headers, body)
         candidates = data.get("candidates") or []
         if not candidates:
@@ -315,6 +345,8 @@ async def _chat(
             body["max_tokens"] = max_tokens
         if temperature is not None:
             body["temperature"] = temperature
+        if search and provider.id == "openai":
+            body["web_search_options"] = {}
         data = await _request(client, "POST", f"{base}/chat/completions", headers, body)
         choices = data.get("choices") or []
         if not choices:
@@ -328,6 +360,50 @@ async def _chat(
     if not text:
         raise ProviderError("The model returned an empty answer. Try a higher max tokens or another model.")
     return text
+
+
+async def _anthropic_chat(
+    client: httpx.AsyncClient,
+    base: str,
+    headers: Dict[str, str],
+    model: str,
+    messages: List[Dict[str, Any]],
+    system: str,
+    temperature: Optional[float],
+    max_tokens: int,
+    search: bool,
+) -> str:
+    """Messages API call; with search, the server-side web search tool.
+
+    Search results come back as extra content blocks (server_tool_use,
+    web_search_tool_result) between the text blocks; only the text is the
+    answer. A long search can pause the turn (stop_reason "pause_turn"): send
+    the conversation back with the partial answer and it continues."""
+    body: Dict[str, Any] = {"model": model, "max_tokens": max_tokens, "messages": list(messages)}
+    if system:
+        body["system"] = system
+    if temperature is not None:
+        body["temperature"] = temperature
+    tool_types = list(_ANTHROPIC_SEARCH_TOOLS) if search else [None]
+    for i, tool_type in enumerate(tool_types):
+        if tool_type:
+            body["tools"] = [{"type": tool_type, "name": "web_search", "max_uses": 5}]
+        try:
+            data = await _request(client, "POST", f"{base}/v1/messages", headers, body)
+            break
+        except ProviderError as err:
+            # Older models only know the basic search tool
+            if tool_type and i + 1 < len(tool_types) and "web_search" in str(err):
+                continue
+            raise
+    content = list(data.get("content", []))
+    for _ in range(4):
+        if data.get("stop_reason") != "pause_turn":
+            break
+        body["messages"] = list(messages) + [{"role": "assistant", "content": content}]
+        data = await _request(client, "POST", f"{base}/v1/messages", headers, body)
+        content += data.get("content", [])
+    return "".join(b.get("text", "") for b in content if b.get("type") == "text")
 
 
 async def test(conn: Dict[str, Any]) -> Dict[str, Any]:

@@ -19,7 +19,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .. import errors
-from . import freeform, matching, speakers
+from ..settings import store as settings_store
+from . import freeform, identify, matching, speakers
 from .training import (
     ACCELERATORS,
     AUTO_CHECKPOINT,
@@ -261,7 +262,22 @@ async def api_freeform_take(name: str, take_id: str) -> Dict[str, Any]:
 
 @app.get("/api/voices/{name}/speakers")
 async def api_people(name: str) -> Dict[str, Any]:
-    return speakers.public(store.get(name))
+    voice = store.get(name)
+    return {**speakers.public(voice), "identify": identify.status(voice)}
+
+
+class IdentifyRequest(BaseModel):
+    everyone: bool = False
+
+
+@app.post("/api/voices/{name}/speakers/identify")
+async def api_people_identify(name: str, request: IdentifyRequest) -> Dict[str, Any]:
+    """Ask the AI who the people are (in the background; poll GET speakers)."""
+    voice = store.get(name)
+    if not settings_store.active_connection():
+        raise RuntimeError("Add an AI connection in Settings → AI connections first")
+    identify.schedule(voice, request.everyone)
+    return {**speakers.public(voice), "identify": {**identify.status(voice), "running": True}}
 
 
 class PersonUpdate(BaseModel):
