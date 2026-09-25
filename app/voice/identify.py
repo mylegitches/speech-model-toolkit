@@ -265,6 +265,7 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
     if conn is None:
         raise RuntimeError("Add an AI connection in Settings → AI connections first")
 
+    await asyncio.to_thread(backfill, voice)
     data = speakers.load(voice)
     candidates = [
         p for p in data["people"]
@@ -337,6 +338,53 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
                  voice.name, len(answers), len(candidates), renamed, merged, time.monotonic() - started,
                  f" (cast: {show})" if show else "")
     return speakers.public(voice)
+
+
+def backfill(voice: Voice) -> int:
+    """Give people found before lines were kept (older imports) their lines and file metadata.
+
+    Uses the takes still waiting for review (saved takes are gone); runs once per voice.
+    """
+    from . import freeform  # imports speakers too
+
+    if speakers.load(voice).get("backfilled"):
+        return 0
+    found: Dict[str, List[Tuple[str, Dict[str, Any], int]]] = {}
+    tags: Dict[str, Dict[str, str]] = {}
+    takes_dir = freeform._takes_dir(voice)
+    for take_dir in sorted(takes_dir.iterdir()) if takes_dir.is_dir() else []:
+        if not (take_dir / "take.json").is_file() or take_dir.name in freeform._live:
+            continue
+        try:
+            take = freeform._read(take_dir)
+        except (OSError, ValueError):
+            continue
+        name = take.get("name") or ""
+        for speaker in take.get("speakers") or []:
+            if speaker.get("person"):
+                found.setdefault(speaker["person"], []).append((take_dir.name, take, speaker["id"]))
+        source = take_dir / (take.get("source") or "")
+        if name and take.get("speakers") and "tags" not in take and source.is_file():
+            tags[name] = freeform.file_tags(source)
+
+    added = 0
+    with speakers._lock:
+        data = speakers.load(voice)
+        for person in data["people"]:
+            have = {line.get("file") for line in person.get("lines", [])}
+            for _take_id, take, speaker_id in found.get(person["id"], []):
+                if (take.get("name") or "") not in have:
+                    speakers._add_lines(person, take, speaker_id)
+                    added += 1
+        files = data.setdefault("files", {})
+        for name, value in tags.items():
+            if value:
+                files.setdefault(name, value)
+        data["backfilled"] = True
+        speakers._save(voice, data)
+    if added:
+        _LOGGER.info("AI identification for %s: added lines from %d earlier files", voice.name, added)
+    return added
 
 
 async def _safe_cast_lookup(files: List[str], tags: Dict[str, Dict[str, str]],

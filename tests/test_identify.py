@@ -1,6 +1,7 @@
 """AI naming of the people found across files (app/voice/identify.py)."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import numpy as np
@@ -160,3 +161,17 @@ def test_recognised_show_gets_cast_and_second_pass(voice, monkeypatch):
     assert "word for word" in prompts[0]  # openrouter supports web search: quote-search hint
     assert result["ai"]["show"] == "The Sopranos (1999)"
     assert {p["id"]: p for p in result["people"]}["p1"]["ai"]["confidence"] == "high"
+
+
+def test_backfill_lines_from_takes_waiting_for_review(voice):
+    take_dir = voice.root / "freeform" / "t9"
+    take_dir.mkdir(parents=True)
+    (take_dir / "take.json").write_text(json.dumps({
+        "name": "Season 01/S01E09.mkv", "source": "S01E09.mkv",
+        "segments": [{"start": 61.0, "end": 63.0, "text": "Where's Meadow tonight?", "speaker": 0}],
+        "speakers": [{"id": 0, "person": "p3"}],
+    }), encoding="utf-8")
+    assert identify.backfill(voice) == 1
+    lines = {p["id"]: p for p in speakers.load(voice)["people"]}["p3"]["lines"]
+    assert lines[-1] == {"text": "Where's Meadow tonight?", "file": "Season 01/S01E09.mkv", "at": 61.0}
+    assert identify.backfill(voice) == 0  # once per voice
