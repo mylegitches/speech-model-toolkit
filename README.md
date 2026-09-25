@@ -11,6 +11,8 @@ No coding required. Everything runs in one Docker container on your machine; the
 
 This project combines [easy-wakeword-trainer](https://github.com/mylegitches/easy-wakeword-trainer) and [piper-voice-helper](https://github.com/mylegitches/piper-voice-helper).
 
+📘 **[User Guide](USER_GUIDE.md)**: step-by-step instructions for every tab · 📄 **[Full feature writeup](FULL_WRITEUP.md)**: what it does, how it works, verified results
+
 ---
 
 ## Quick start
@@ -63,9 +65,12 @@ Training settings (1000 samples, 10k steps, ...) are in `app/wakeword/config_tem
 ## Voice tab
 
 1. **Voice**: create a voice with a name, language and whether it should sound female or male (this picks a similar pretrained voice to start from).
-2. **Record**, in one of two ways (they can be mixed):
+2. **Dataset**: the training data, short clips of the voice with exactly what was said. Add clips in any of these ways and mix them freely:
    - **Read sentences**: read the prompts shown. Keys: `R` record/stop, `P` play back, `S` save & next, `K` skip.
-   - **Speak freely**: talk naturally (a story, your day, a book read aloud; up to 30 minutes per take), or upload an audio or video file you already have (a voice memo, podcast, interview, movie; up to 8 GB). The take is transcribed locally with Whisper (the model chosen in Settings) and cut into sentence-sized clips at sentence ends, pauses and speaker turns. Review them before saving: ▶ to listen, fix any wrong words (the text must match exactly what was said), untick clips with mistakes, music or other voices.
+   - **Speak freely**: talk naturally (a story, your day, a book read aloud; up to 30 minutes per take).
+   - **Import file**: an audio or video file you already have (voice memo, podcast, interview, movie: MP4, MKV, AVI, MOV, WMV, MP3, WAV, FLAC… up to 8 GB; for videos only the sound is used). Files with several audio tracks (languages, commentary) ask which one to use, with the voice's language preselected. For surround sound (5.1/7.1) only the center channel is used by default, which is where film dialogue sits, away from the music and effects. A prepared dataset zip can be imported here too.
+
+     Spoken and imported takes are transcribed locally with Whisper (the model chosen in Settings) and cut into sentence-sized clips at sentence ends, pauses and speaker turns. Review them before saving: ▶ to listen, fix any wrong words (the text must match exactly what was said), untick clips with mistakes, music or other voices.
      - **Background noise**: *Keep*, *Reduce* (steady hiss and hum; the default) or *Remove* (RNNoise, a speech denoiser that also removes music, traffic and crowds). It can be changed per take while reviewing; the original audio is kept.
      - **Several people talking** (ticked automatically for video files): every clip is also assigned to a speaker, using the same speaker-recognition model as Auto-detect. The review then starts with **Who do you want?**: one card per speaker with how much they talk, three ▶ samples and a quote. Pick one (or several, if one person was split into two groups) and only their clips are listed. If the voice already has 5+ recordings, the speaker who sounds most like them is marked and preselected. Only use recordings of people who agreed to have their voice cloned.
 

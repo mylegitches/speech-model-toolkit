@@ -45,3 +45,19 @@ def test_turns_split_at_whisper_segments():
     ws[4].segment_start = True  # a new Whisper segment: the other person answers
     assert len(split_words(ws, 3.5)) == 1          # no pause, no sentence end: one clip
     assert [c["text"] for c in split_words(ws, 3.5, turns=True)] == ["Where are you going", "Home, I think"]
+
+
+def track(index, language="", title="", default=False, channels=2):
+    return {"index": index, "language": language, "title": title, "default": default,
+            "channels": channels, "surround": channels >= 5}
+
+
+def test_recommended_track_prefers_voice_language_over_commentary():
+    from app.voice.freeform import recommended_track
+    tracks = [track(0, "spa", default=True, channels=6), track(1, "eng", "Director's commentary"),
+              track(2, "eng", channels=6), track(3, "fre")]
+    assert recommended_track(tracks, "en-US") == 2
+    assert recommended_track(tracks, "es-ES") == 0
+    assert recommended_track(tracks, "fr-FR") == 3
+    # Unknown language: the file's default track
+    assert recommended_track([track(0), track(1, default=True)], "de-DE") == 1

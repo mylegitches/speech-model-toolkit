@@ -108,6 +108,16 @@
 .inline-select { flex-direction: row; align-items: center; gap: 0.5rem; }
 .inline-select select { padding: 0.45rem 0.6rem; }
 
+/* Audio track chooser */
+.tracks { display: flex; flex-direction: column; gap: 0.6rem; }
+.track-list { display: flex; flex-direction: column; gap: 0.35rem; }
+.track { flex-direction: row; align-items: center; gap: 0.65rem; color: var(--text); cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 0.5rem 0.7rem; background: var(--surface); }
+.track input[type=radio] { accent-color: var(--accent-h); width: 1.1rem; height: 1.1rem; padding: 0; flex: none; }
+.track .opt-main { display: flex; flex-direction: column; }
+.track small { color: var(--muted); font-size: 0.8rem; }
+.mode-switch .mode-btn { white-space: nowrap; }
+
 /* Speaker picker (diarized takes) */
 .speakers { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.5rem; }
 .speaker { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.65rem 0.75rem; display: flex; flex-direction: column; gap: 0.45rem; background: var(--surface); }
@@ -117,3 +127,7 @@
 .speaker .quote { color: var(--muted); font-size: 0.82rem; font-style: italic; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .speaker .samples { display: flex; gap: 0.35rem; }
 .speaker .btn { padding: 0.3rem 0.65rem; font-size: 0.82rem; }
+
+@media (max-width: 640px) {
+  .mode-switch .mode-btn { white-space: normal; font-size: 0.85rem; padding: 0.45rem 0.3rem; line-height: 1.25; }
+}

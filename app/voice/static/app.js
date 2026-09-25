@@ -138,7 +138,7 @@ function updateRecorded(count) {
   fill.style.width = `${Math.min(100, count / 10)}%`;
   let text;
   if (count < 50) {
-    text = `record at least 50 to train (${50 - count} to go)`;
+    text = `at least 50 clips needed to train (${50 - count} to go)`;
     fill.style.background = 'var(--danger)';
   } else if (count < 300) {
     text = 'enough to train · 300+ sounds much better';
@@ -423,10 +423,14 @@ const renderedTakes = {};  // take id -> state it was last rendered in
 const takeEdits = {};      // take id -> {clips: {index: {keep, text}}, speakers: Set}
 
 function setMode(mode) {
+  if (!['prompts', 'free', 'file'].includes(mode)) mode = 'prompts';
   recordMode = mode;
   document.querySelectorAll('.mode-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+  show($('#mic-block'), mode !== 'file');
   show($('#prompt-mode'), mode === 'prompts');
   show($('#free-mode'), mode === 'free');
+  show($('#file-mode'), mode === 'file');
+  show($('#takes-block'), mode !== 'prompts');  // takes waiting for review
   try { localStorage.setItem('voice.recordMode', mode); } catch (e) { /* ignore */ }
 }
 document.querySelectorAll('.mode-btn').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
@@ -471,7 +475,7 @@ $('#free-record-btn').addEventListener('click', async () => {
     button.textContent = '● Start recording';
     button.disabled = false;
     show($('#free-timer'), false);
-    await uploadTake(new Blob(freeChunks, { type }), `take.${ext}`, false);
+    await uploadTake(new Blob(freeChunks, { type }), `take.${ext}`, false, $('#free-denoise').value);
   };
   freeRecorder.start(1000);
   freeStarted = Date.now();
@@ -490,9 +494,11 @@ $('#free-record-btn').addEventListener('click', async () => {
 // Videos usually have several speakers (and a soundtrack)
 $('#free-file').addEventListener('change', () => {
   const file = $('#free-file').files[0];
-  if (file && file.type.startsWith('video/')) {
+  const video = file && (file.type.startsWith('video/')
+    || /\.(mkv|mp4|m4v|avi|mov|wmv|flv|webm|ts|m2ts|mts|mpg|mpeg|vob|3gp|ogv)$/i.test(file.name));
+  if (video) {
     $('#free-diarize').checked = true;
-    $('#free-denoise').value = 'strong';
+    $('#file-denoise').value = 'strong';
   }
 });
 
@@ -500,15 +506,15 @@ $('#free-upload-btn').addEventListener('click', async () => {
   const file = $('#free-file').files[0];
   if (!file) return;
   $('#free-upload-btn').disabled = true;
-  await uploadTake(file, file.name, $('#free-diarize').checked);
+  await uploadTake(file, file.name, $('#free-diarize').checked, $('#file-denoise').value);
   $('#free-upload-btn').disabled = false;
   $('#free-file').value = '';
 });
 
-function uploadTake(blob, filename, diarize) {
+function uploadTake(blob, filename, diarize, denoise) {
   const form = new FormData();
   form.set('audio', blob, filename);
-  form.set('denoise', $('#free-denoise').value);
+  form.set('denoise', denoise);
   form.set('diarize', diarize ? 'true' : 'false');
   form.set('mic', micLabel || '');
   const status = $('#free-upload-status');
@@ -563,8 +569,9 @@ async function loadTakes() {
     if (existing) existing.replaceWith(node); else box.append(node);
     renderedTakes[take.id] = take.state;
   });
-  if (takes.length && recordMode !== 'free' && takes.some((t) => t.state === 'done')) {
-    setMode('free');  // there's something waiting for review
+  if (recordMode === 'prompts' && takes.some((t) => ['done', 'choose_track'].includes(t.state))) {
+    // Something is waiting for review: show it where it came from
+    setMode(takes.some((t) => t.tracks && t.source && !/^source\.(webm|ogg|m4a)$/.test(t.source)) ? 'file' : 'free');
   }
   if (takes.some((t) => t.state === 'running')) takesTimer = setTimeout(loadTakes, 2000);
 }
@@ -573,7 +580,25 @@ function takeTitle(take) {
   const m = take.id.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/);
   const parts = [`Take ${m ? `${m[2]}/${m[3]} ${m[4]}:${m[5]}` : take.id}`];
   if (take.duration) parts.push(clock(take.duration));
+  if (take.tracks && take.tracks.length > 1 && take.state !== 'choose_track') {
+    parts.push(trackLabel(take.tracks[take.track]));
+  }
+  if (take.dialogue && take.state !== 'choose_track') parts.push('dialogue channel');
   if (take.speakers) parts.push(`${take.speakers.length} speaker${take.speakers.length === 1 ? '' : 's'}`);
+  return parts.join(' · ');
+}
+
+const LANGUAGE_NAMES = {
+  eng: 'English', spa: 'Spanish', fra: 'French', fre: 'French', deu: 'German', ger: 'German',
+  ita: 'Italian', por: 'Portuguese', nld: 'Dutch', dut: 'Dutch', rus: 'Russian', pol: 'Polish',
+  jpn: 'Japanese', kor: 'Korean', zho: 'Chinese', chi: 'Chinese', hin: 'Hindi', ara: 'Arabic',
+  swe: 'Swedish', dan: 'Danish', nor: 'Norwegian', fin: 'Finnish', tur: 'Turkish', ukr: 'Ukrainian',
+};
+
+function trackLabel(track) {
+  const parts = [LANGUAGE_NAMES[track.language] || (track.language ? track.language.toUpperCase() : `Track ${track.index + 1}`)];
+  if (track.title) parts.push(track.title);
+  parts.push(track.layout || `${track.channels} ch`, track.codec.toUpperCase());
   return parts.join(' · ');
 }
 
@@ -617,6 +642,11 @@ function renderTake(take) {
   if (take.state === 'error') {
     head.append(discard);
     box.append(el('div', { className: 'banner banner--error', textContent: take.error || 'Transcription failed' }));
+    return box;
+  }
+  if (take.state === 'choose_track') {
+    head.append(discard);
+    box.append(renderTrackChooser(take));
     return box;
   }
 
@@ -739,13 +769,59 @@ function renderTake(take) {
       const result = await postJson(voiceUrl(`/freeform/${take.id}/save`), { clips });
       delete takeEdits[take.id];
       updateRecorded(result.recorded);
-      box.replaceWith(el('div', { className: 'banner banner--success', textContent: `Saved ${result.saved} clips as recordings.` }));
+      box.replaceWith(el('div', { className: 'banner banner--success', textContent: `Added ${result.saved} clips to the dataset.` }));
     } catch (err) {
       SMT.showError(err.message);
       updateSave();
     }
   });
   return box;
+}
+
+function renderTrackChooser(take) {
+  const wrap = el('div', { className: 'tracks' });
+  wrap.append(el('p', {
+    className: 'hint',
+    textContent: 'This file has several audio tracks. Pick the one with the voice you want (the voice’s language is preselected).',
+  }));
+  let chosen = take.track;
+  const dialogue = el('label', { className: 'switch' },
+    el('input', { type: 'checkbox', checked: take.dialogue }),
+    el('span', { textContent: 'Dialogue only: use the center channel of surround sound (cleaner voice, less music and effects)' }));
+  const updateDialogue = () => {
+    const surround = take.tracks[chosen].surround;
+    dialogue.classList.toggle('hidden', !surround);
+    dialogue.querySelector('input').checked = surround;
+  };
+  const list = el('div', { className: 'track-list' });
+  take.tracks.forEach((track) => {
+    const radio = el('input', { type: 'radio', name: `track-${take.id}`, checked: track.index === chosen });
+    radio.addEventListener('change', () => { chosen = track.index; updateDialogue(); });
+    const notes = [];
+    if (track.index === take.track) notes.push('suggested');
+    if (track.default) notes.push('default track');
+    if (track.surround) notes.push('surround');
+    list.append(el('label', { className: 'track' }, radio,
+      el('span', { className: 'opt-main' }, el('strong', { textContent: trackLabel(track) }),
+        el('small', { textContent: notes.join(' · ') || ' ' }))));
+  });
+  const go = el('button', { type: 'button', className: 'btn btn--primary', textContent: 'Use this track' });
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    try {
+      await postJson(voiceUrl(`/freeform/${take.id}/track`), {
+        track: chosen, dialogue: dialogue.querySelector('input').checked,
+      });
+    } catch (err) {
+      SMT.showError(err.message);
+      go.disabled = false;
+      return;
+    }
+    loadTakes();
+  });
+  wrap.append(list, dialogue, el('div', { className: 'row' }, go));
+  updateDialogue();
+  return wrap;
 }
 
 let clipButton = null;
@@ -775,7 +851,7 @@ $('#upload-btn').addEventListener('click', async () => {
   try {
     const result = await api(voiceUrl('/upload'), { method: 'POST', body: form });
     updateRecorded(result.recorded);
-    alert(`Imported ${result.imported} recordings.`);
+    alert(`Added ${result.imported} clips to the dataset.`);
   } catch (err) {
     SMT.showError(`Upload failed: ${err.message}`);
   } finally {
@@ -1025,7 +1101,7 @@ function trainSettings() {
 }
 
 $('#train-btn').addEventListener('click', async () => {
-  if (voice.recorded < 50 && !confirm(`Only ${voice.recorded} recordings. The voice will sound rough. Train anyway?`)) {
+  if (voice.recorded < 50 && !confirm(`Only ${voice.recorded} clips in the dataset. The voice will sound rough. Train anyway?`)) {
     return;
   }
   try {

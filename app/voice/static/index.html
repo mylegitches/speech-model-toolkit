@@ -13,7 +13,7 @@
   <div class="container">
     <header>
       <h1>Voice Trainer</h1>
-      <p class="subtitle">Record your voice, click Train, and use it in Home Assistant.</p>
+      <p class="subtitle">Build a dataset of the voice, click Train, and use it in Home Assistant.</p>
     </header>
 
     <div id="device-banner" class="banner banner--warning hidden"></div>
@@ -52,9 +52,10 @@
       <p id="voice-summary" class="hint"></p>
     </section>
 
-    <!-- 2. Record -->
+    <!-- 2. Dataset -->
     <section id="record-card" class="card hidden">
-      <h2><span class="step">2</span> Record</h2>
+      <h2><span class="step">2</span> Dataset</h2>
+      <p class="hint">The training data: short clips of the voice, each with exactly what was said. Add clips in any of these ways and mix them freely.</p>
 
       <div class="readiness">
         <div class="readiness-bar"><div id="readiness-fill"></div>
@@ -62,36 +63,39 @@
           <span class="mark" style="left: 30%">300</span>
           <span class="mark" style="left: 100%">1000</span>
         </div>
-        <p class="hint"><strong id="recorded-count">0</strong> recordings · <span id="readiness-text"></span></p>
+        <p class="hint"><strong id="recorded-count">0</strong> clips in the dataset · <span id="readiness-text"></span></p>
       </div>
-
-      <div class="row mic-row">
-        <label class="grow">Microphone
-          <select id="mic-select"><option value="">Click “Enable microphone” to list your microphones</option></select>
-        </label>
-        <button id="mic-test-btn" class="btn btn--secondary">🎤 Enable microphone</button>
-      </div>
-      <div class="vu"><div id="vu-bar" class="vu-bar"></div></div>
-      <div id="mic-warning" class="banner banner--warning hidden"></div>
 
       <div class="mode-switch" role="tablist">
         <button type="button" class="mode-btn active" data-mode="prompts" role="tab">Read sentences</button>
         <button type="button" class="mode-btn" data-mode="free" role="tab">Speak freely</button>
+        <button type="button" class="mode-btn" data-mode="file" role="tab">Import file</button>
+      </div>
+
+      <div id="mic-block" class="mode-panel">
+        <div class="row mic-row">
+          <label class="grow">Microphone
+            <select id="mic-select"><option value="">Click “Enable microphone” to list your microphones</option></select>
+          </label>
+          <button id="mic-test-btn" class="btn btn--secondary">🎤 Enable microphone</button>
+        </div>
+        <div class="vu"><div id="vu-bar" class="vu-bar"></div></div>
+        <div id="mic-warning" class="banner banner--warning hidden"></div>
       </div>
 
       <div id="prompt-mode" class="mode-panel">
-      <div id="prompt-box" class="prompt-box">
-        <p id="prompt-text" class="prompt-text">Loading…</p>
-      </div>
+        <div id="prompt-box" class="prompt-box">
+          <p id="prompt-text" class="prompt-text">Loading…</p>
+        </div>
 
-      <div class="row controls">
-        <button id="record-btn" class="btn btn--record">● Record <kbd>R</kbd></button>
-        <button id="play-btn" class="btn btn--secondary" disabled>▶ Play <kbd>P</kbd></button>
-        <button id="save-btn" class="btn btn--primary" disabled>✓ Save &amp; next <kbd>S</kbd></button>
-        <button id="skip-btn" class="btn btn--ghost">Skip <kbd>K</kbd></button>
-      </div>
-      <p id="record-status" class="hint">First pick your microphone and click “Enable microphone”. Use the same one every session.</p>
-      <audio id="playback" class="hidden"></audio>
+        <div class="row controls">
+          <button id="record-btn" class="btn btn--record">● Record <kbd>R</kbd></button>
+          <button id="play-btn" class="btn btn--secondary" disabled>▶ Play <kbd>P</kbd></button>
+          <button id="save-btn" class="btn btn--primary" disabled>✓ Save &amp; next <kbd>S</kbd></button>
+          <button id="skip-btn" class="btn btn--ghost">Skip <kbd>K</kbd></button>
+        </div>
+        <p id="record-status" class="hint">First pick your microphone and click “Enable microphone”. Use the same one every session.</p>
+        <audio id="playback" class="hidden"></audio>
       </div>
 
       <div id="free-mode" class="mode-panel hidden">
@@ -107,29 +111,41 @@
             </select>
           </label>
         </div>
+      </div>
 
-        <details class="upload" id="free-upload">
-          <summary>Or use an audio or video file you already have</summary>
-          <p class="hint">A voice memo, podcast, interview or movie. Only use recordings of people who agreed to have their voice cloned.</p>
+      <div id="file-mode" class="mode-panel hidden">
+        <p class="hint">Audio or video: a voice memo, podcast, interview or movie (MP4, MKV, AVI, MOV, WMV, MP3, WAV, FLAC… up to 8 GB). For videos only the sound is used. It's transcribed and cut into clips for you to check. Only use recordings of people who agreed to have their voice cloned.</p>
+        <div class="row">
+          <input type="file" id="free-file" class="grow"
+                 accept="audio/*,video/*,.mkv,.mp4,.m4v,.avi,.mov,.wmv,.flv,.webm,.ts,.m2ts,.mts,.mpg,.mpeg,.vob,.3gp,.ogv,.mp3,.wav,.flac,.ogg,.opus,.m4a,.m4b,.aac,.ac3,.eac3,.dts,.wma,.aiff,.aif" />
+          <button id="free-upload-btn" class="btn btn--primary">Import</button>
+        </div>
+        <div class="row">
+          <label class="inline-select">Background noise
+            <select id="file-denoise">
+              <option value="off">Keep as is</option>
+              <option value="light" selected>Reduce (hiss, hum)</option>
+              <option value="strong">Remove (music, traffic, crowds)</option>
+            </select>
+          </label>
+        </div>
+        <label class="switch"><input type="checkbox" id="free-diarize" /><span>Several people are talking: find each speaker so you can pick one</span></label>
+        <p id="free-upload-status" class="hint"></p>
+
+        <details class="upload">
+          <summary>Already have a prepared dataset? Import a .zip</summary>
+          <p class="hint">Either <code>metadata.csv</code> (<code>file|text</code> per line) with the audio files, or each audio file next to a <code>.txt</code> with its transcript. WAV, FLAC, MP3, OGG and WebM work. Clips are added as they are, without review.</p>
           <div class="row">
-            <input type="file" id="free-file" accept="audio/*,video/*,.m4a,.mp3,.wav,.flac,.ogg,.webm,.mkv,.mp4,.mov" class="grow" />
-            <button id="free-upload-btn" class="btn btn--secondary">Transcribe file</button>
+            <input type="file" id="upload-input" accept=".zip" class="grow" />
+            <button id="upload-btn" class="btn btn--secondary">Import zip</button>
           </div>
-          <label class="switch"><input type="checkbox" id="free-diarize" /><span>Several people are talking: find each speaker so you can pick one</span></label>
-          <p id="free-upload-status" class="hint"></p>
         </details>
+      </div>
+
+      <div id="takes-block" class="mode-panel hidden">
         <div id="free-takes" class="free-takes"></div>
         <audio id="clip-audio" class="hidden"></audio>
       </div>
-
-      <details class="upload">
-        <summary>Already have recordings? Upload a .zip</summary>
-        <p class="hint">Either <code>metadata.csv</code> (<code>file|text</code> per line) with the audio files, or each audio file next to a <code>.txt</code> with its transcript. WAV, FLAC, MP3, OGG and WebM work.</p>
-        <div class="row">
-          <input type="file" id="upload-input" accept=".zip" class="grow" />
-          <button id="upload-btn" class="btn btn--secondary">Upload</button>
-        </div>
-      </details>
     </section>
 
     <!-- 3. Train -->

@@ -255,6 +255,17 @@ async def api_freeform_take(name: str, take_id: str) -> Dict[str, Any]:
     return freeform.get_take(store.get(name), take_id)
 
 
+class TrackRequest(BaseModel):
+    track: int
+    dialogue: bool = True
+
+
+@app.post("/api/voices/{name}/freeform/{take_id}/track")
+async def api_freeform_track(name: str, take_id: str, request: TrackRequest) -> Dict[str, Any]:
+    """Pick the audio track of a file with several (and whether to use only dialogue)."""
+    return freeform.choose_track(store.get(name), take_id, request.track, request.dialogue)
+
+
 class DenoiseRequest(BaseModel):
     denoise: str
 

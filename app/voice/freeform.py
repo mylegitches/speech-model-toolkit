@@ -1,10 +1,16 @@
 """Freeform recording: one long take -> Whisper -> sentence-sized clips to review.
 
 voices/<name>/freeform/<take id>/
-  source.<ext>   what was recorded or uploaded (audio or video)
-  audio.wav      22050 Hz mono copy the clips are cut from
+  source.<ext>   what was recorded or uploaded (audio or video: only the sound is used)
+  audio.wav      22050 Hz mono copy of the chosen audio track the clips are cut from
   take.json      {"state", "detail", "error", "duration", "created", "denoise",
+                  "tracks", "track", "dialogue",
                   "segments": [{"start", "end", "text", "speaker"?}], "speakers"?}
+
+Files with several audio tracks (movie languages, commentary) wait in state
+"choose_track" until a track is picked. With surround sound (5.1/7.1) only the
+center channel is used by default: that's where film dialogue is mixed, away
+from the music and effects.
 
 Piper trains on short clips (about 1-15 s) with exact transcripts, so the take
 is split at sentence ends and pauses using Whisper's word timestamps. With
@@ -168,6 +174,63 @@ def _ffmpeg(args: List[str]) -> bytes:
     return proc.stdout
 
 
+# ISO 639-2 codes in media files -> the language prefixes voices use
+_LANGUAGE_CODES = {
+    "eng": "en", "spa": "es", "fra": "fr", "fre": "fr", "deu": "de", "ger": "de", "ita": "it",
+    "por": "pt", "nld": "nl", "dut": "nl", "pol": "pl", "rus": "ru", "ukr": "uk", "tur": "tr",
+    "ara": "ar", "hin": "hi", "zho": "zh", "chi": "zh", "jpn": "ja", "kor": "ko", "swe": "sv",
+    "dan": "da", "nor": "no", "nob": "nb", "fin": "fi", "ces": "cs", "cze": "cs", "ell": "el",
+    "gre": "el", "vie": "vi", "hun": "hu", "ron": "ro", "rum": "ro", "slk": "sk", "slo": "sk",
+    "cat": "ca", "heb": "he", "ind": "id", "msa": "ms", "may": "ms", "srp": "sr", "hrv": "hr",
+}
+
+
+def probe_tracks(source: Path) -> List[Dict[str, Any]]:
+    """The audio tracks in a file (via ffprobe), in stream order."""
+    proc = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
+         "stream=codec_name,channels,channel_layout:stream_tags=language,title:stream_disposition=default",
+         "-of", "json", str(source)],
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        stderr = proc.stderr.decode(errors="replace")
+        _LOGGER.warning("ffprobe failed (%s): %s", proc.returncode, stderr.strip()[-500:])
+        raise ValueError(friendly_ffmpeg_error(stderr))
+    tracks = []
+    for n, stream in enumerate(json.loads(proc.stdout or b"{}").get("streams", [])):
+        tags = stream.get("tags") or {}
+        language = (tags.get("language") or "").lower()
+        channels = int(stream.get("channels") or 0)
+        tracks.append({
+            "index": n,
+            "codec": stream.get("codec_name") or "?",
+            "channels": channels,
+            "layout": stream.get("channel_layout") or (f"{channels} ch" if channels else ""),
+            "language": language if language not in ("und", "") else "",
+            "title": tags.get("title") or "",
+            "default": bool((stream.get("disposition") or {}).get("default")),
+            "surround": channels >= 5,  # 5.0 / 5.1 / 7.1 all have a center channel
+        })
+    return tracks
+
+
+def recommended_track(tracks: List[Dict[str, Any]], voice_language: str) -> int:
+    """The voice's language, not a commentary, the default track, most channels."""
+    want = voice_language.split("-")[0].lower()
+
+    def score(track: Dict[str, Any]):
+        lang = _LANGUAGE_CODES.get(track["language"], track["language"][:2])
+        return (
+            lang == want,
+            "comment" not in track["title"].lower(),
+            track["default"],
+            track["channels"],
+        )
+
+    return max(tracks, key=score)["index"]
+
+
 class _Word:
     __slots__ = ("start", "end", "word", "segment_start")
 
@@ -177,10 +240,13 @@ class _Word:
 
 
 def _transcribe(take_dir: Path, source: Path, model_id: str, language: str, turns: bool,
-                progress: Callable[[str], None]) -> Dict[str, Any]:
-    progress("Extracting audio…")
+                progress: Callable[[str], None], track: int = 0, dialogue: bool = False) -> Dict[str, Any]:
+    progress("Extracting the dialogue channel…" if dialogue else "Extracting audio…")
     wav = take_dir / "audio.wav"
-    _ffmpeg(["-i", str(source), "-vn", "-ac", "1", "-ar", str(CLIP_RATE), "-c:a", "pcm_s16le", str(wav)])
+    # -map picks the audio track; the center channel (FC) of a surround mix is the dialogue
+    mix = ["-af", "pan=mono|c0=FC"] if dialogue else ["-ac", "1"]
+    _ffmpeg(["-i", str(source), "-map", f"0:a:{track}", "-vn", *mix,
+             "-ar", str(CLIP_RATE), "-c:a", "pcm_s16le", str(wav)])
     pcm = _ffmpeg(["-i", str(wav), "-ac", "1", "-ar", "16000", "-f", "s16le", "-"])
     audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
     duration = len(audio) / 16000
@@ -264,7 +330,9 @@ def new_take(voice: Voice, filename: str) -> Path:
 
 
 def start(voice: Voice, source: Path, denoise: Any = "light", diarize: bool = False) -> Dict[str, Any]:
-    """Transcribe (and optionally diarize) the source in the background."""
+    """Check the upload, then transcribe (and optionally diarize) it in the background.
+
+    Files with several audio tracks wait in state "choose_track" (see choose_track)."""
     take_dir = source.parent
     take_id = take_dir.name
     size = source.stat().st_size
@@ -275,30 +343,69 @@ def start(voice: Voice, source: Path, denoise: Any = "light", diarize: bool = Fa
         shutil.rmtree(take_dir, ignore_errors=True)
         raise RuntimeError("Speech recognition (faster-whisper) is not installed")
 
-    model_id = _model_for(voice)
+    try:
+        tracks = probe_tracks(source)
+    except ValueError:
+        shutil.rmtree(take_dir, ignore_errors=True)
+        raise
+    if not tracks:
+        shutil.rmtree(take_dir, ignore_errors=True)
+        raise ValueError("This file has no audio track.")
+
+    recommended = recommended_track(tracks, voice.language)
     take: Dict[str, Any] = {
-        "state": "running", "detail": "Starting…", "error": None, "created": time.time(),
-        "duration": None, "segments": [], "model": model_id,
+        "state": "choose_track", "detail": "", "error": None, "created": time.time(),
+        "duration": None, "segments": [], "model": _model_for(voice),
         "denoise": _level(denoise), "diarize": bool(diarize),
+        "source": source.name, "size": size,
+        "tracks": tracks, "track": recommended, "dialogue": tracks[recommended]["surround"],
     }
+    _LOGGER.info("Freeform take %s/%s uploaded: %s (%.1f MB), %d audio track(s)",
+                 voice.name, take_id, source.name, size / 2**20, len(tracks))
+    if len(tracks) > 1:
+        _write(take_dir, take)  # wait for the track choice
+        return _public(take_id, take)
+    return _begin(voice, take_dir, take)
+
+
+def choose_track(voice: Voice, take_id: str, track: int, dialogue: bool) -> Dict[str, Any]:
+    """Pick the audio track (and whether to use only its dialogue channel), then start."""
+    take_dir = _take_dir(voice, take_id)
+    take = _read(take_dir)
+    if take["state"] != "choose_track":
+        raise RuntimeError("This take is already being processed")
+    tracks = take["tracks"]
+    if not 0 <= int(track) < len(tracks):
+        raise ValueError(f"No audio track {track}")
+    take["track"] = int(track)
+    take["dialogue"] = bool(dialogue) and tracks[int(track)]["surround"]
+    return _begin(voice, take_dir, take)
+
+
+def _begin(voice: Voice, take_dir: Path, take: Dict[str, Any]) -> Dict[str, Any]:
+    take_id = take_dir.name
+    source = take_dir / take["source"]
+    track, dialogue = take["track"], take["dialogue"]
+    take.update(state="running", detail="Starting…")
     _write(take_dir, take)
     _live[take_id] = take
 
     def progress(line: str) -> None:
         take["detail"] = line
 
-    _LOGGER.info("Freeform take %s/%s started: %s (%.1f MB), whisper=%s, noise=%s, diarize=%s",
-                 voice.name, take_id, source.name, size / 2**20, model_id, take["denoise"], bool(diarize))
+    _LOGGER.info("Freeform take %s/%s started: track %d%s, whisper=%s, noise=%s, diarize=%s",
+                 voice.name, take_id, track, " (dialogue channel)" if dialogue else "",
+                 take["model"], take["denoise"], take["diarize"])
     started = time.monotonic()
 
     async def run() -> None:
         try:
             result = await asyncio.to_thread(
-                _transcribe, take_dir, source, model_id,
-                voice.language.split("-")[0].lower(), bool(diarize), progress,
+                _transcribe, take_dir, source, take["model"],
+                voice.language.split("-")[0].lower(), take["diarize"], progress, track, dialogue,
             )
             take.update(result)
-            if diarize and take["segments"]:
+            if take["diarize"] and take["segments"]:
                 progress("Finding speakers…")
                 await _diarize(voice, take_dir, take, progress)
             take.update(state="done", detail="")
