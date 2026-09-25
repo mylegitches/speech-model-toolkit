@@ -558,7 +558,9 @@ class TrainingManager:
             )
             if num_utterances < 10:
                 raise RuntimeError(
-                    f"Only {num_utterances} usable recording(s); record at least 10"
+                    f"Only {num_utterances} usable clip(s) in the dataset; at least 10 are needed "
+                    "(50+ recommended). Add more in 2. Dataset, and remember that recorded or "
+                    "imported takes only count after you press ✓ Save in their review"
                 )
 
             self._log(ws, f"Prepared {num_utterances} recordings")

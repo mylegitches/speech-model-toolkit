@@ -108,6 +108,13 @@
 .inline-select { flex-direction: row; align-items: center; gap: 0.5rem; }
 .inline-select select { padding: 0.45rem 0.6rem; }
 
+.pending-note { color: var(--warning); font-weight: 600; }
+#train-pending { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
+#train-pending span { flex: 1; min-width: 12rem; }
+#train-pending.hidden { display: none; }
+.take-foot { display: flex; justify-content: flex-end; gap: 0.6rem; flex-wrap: wrap; }
+.next-step { color: var(--accent-text); font-weight: 600; font-size: 0.9rem; }
+
 /* Audio track chooser */
 .tracks { display: flex; flex-direction: column; gap: 0.6rem; }
 .track-list { display: flex; flex-direction: column; gap: 0.35rem; }

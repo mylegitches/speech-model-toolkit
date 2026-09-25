@@ -574,7 +574,35 @@ async function loadTakes() {
     setMode(takes.some((t) => t.tracks && t.source && !/^source\.(webm|ogg|m4a)$/.test(t.source)) ? 'file' : 'free');
   }
   if (takes.some((t) => t.state === 'running')) takesTimer = setTimeout(loadTakes, 2000);
+  updatePending(takes);
 }
+
+// Clips from recorded/imported takes only join the dataset once saved:
+// say so next to the counter and in the Train step.
+let pendingClips = 0;
+let pendingTakes = 0;
+function updatePending(takes) {
+  const waiting = takes.filter((t) => ['done', 'choose_track', 'running'].includes(t.state));
+  pendingTakes = waiting.length;
+  pendingClips = waiting.reduce((sum, t) => sum + (t.state === 'done' ? t.segments.length : 0), 0);
+  const what = pendingClips
+    ? `${pendingClips} clip${pendingClips === 1 ? '' : 's'} waiting for review`
+    : `${pendingTakes} take${pendingTakes === 1 ? '' : 's'} still being prepared or waiting for a choice`;
+  const note = $('#pending-note');
+  note.textContent = pendingTakes ? ` · ${what}` : '';
+  show(note, pendingTakes > 0);
+  $('#train-pending-text').textContent = pendingTakes
+    ? `${what[0].toUpperCase()}${what.slice(1)} in 2. Dataset. They're not in the dataset until you press ✓ Save in their review.`
+    : '';
+  show($('#train-pending'), pendingTakes > 0);
+}
+
+function goToReview() {
+  if (recordMode === 'prompts') setMode('free');
+  const first = document.querySelector('#free-takes .take');
+  (first || $('#record-card')).scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+$('#train-pending-btn').addEventListener('click', goToReview);
 
 function takeTitle(take) {
   const m = take.id.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/);
@@ -655,7 +683,13 @@ function renderTake(take) {
   const visible = (i) => !take.speakers || edits.speakers.has(take.segments[i].speaker);
   const kept = () => take.segments.filter((_, i) => visible(i) && edits.clips[i]?.keep !== false).length;
   const save = el('button', { type: 'button', className: 'btn btn--primary' });
-  const updateSave = () => { save.textContent = `✓ Save ${kept()} clips`; save.disabled = kept() === 0; };
+  const saveBottom = el('button', { type: 'button', className: 'btn btn--primary' });
+  const updateSave = () => {
+    for (const b of [save, saveBottom]) {
+      b.textContent = `✓ Save ${kept()} clips to the dataset`;
+      b.disabled = kept() === 0;
+    }
+  };
 
   const noise = el('select', {},
     new Option('Noise: keep', 'off'), new Option('Noise: reduce', 'light'), new Option('Noise: remove', 'strong'));
@@ -728,9 +762,14 @@ function renderTake(take) {
     }
     box.append(grid);
     if (!edits.speakers.size) {
+      box.append(el('p', { className: 'next-step', textContent: 'Next: pick the speaker you want above.' }));
       updateSave();
       return box;
     }
+    box.append(el('p', {
+      className: 'next-step',
+      textContent: 'Next: check the clips below, then press ✓ Save to add them to the dataset.',
+    }));
   }
 
   box.append(el('p', {
@@ -757,19 +796,24 @@ function renderTake(take) {
     list.append(row);
   });
   box.append(list);
+  box.append(el('div', { className: 'take-foot' }, saveBottom));
   updateSave();
 
+  saveBottom.addEventListener('click', () => save.click());
   save.addEventListener('click', async () => {
     const clips = take.segments
       .map((_, i) => ({ index: i, text: (edits.clips[i]?.text ?? '').trim(), keep: edits.clips[i]?.keep !== false }))
       .filter((c, i) => visible(i) && c.keep && c.text);
     save.disabled = true;
+    saveBottom.disabled = true;
     save.textContent = 'Saving…';
+    saveBottom.textContent = 'Saving…';
     try {
       const result = await postJson(voiceUrl(`/freeform/${take.id}/save`), { clips });
       delete takeEdits[take.id];
       updateRecorded(result.recorded);
       box.replaceWith(el('div', { className: 'banner banner--success', textContent: `Added ${result.saved} clips to the dataset.` }));
+      loadTakes();  // refresh the "waiting for review" counts
     } catch (err) {
       SMT.showError(err.message);
       updateSave();
@@ -1101,7 +1145,16 @@ function trainSettings() {
 }
 
 $('#train-btn').addEventListener('click', async () => {
-  if (voice.recorded < 50 && !confirm(`Only ${voice.recorded} clips in the dataset. The voice will sound rough. Train anyway?`)) {
+  if (voice.recorded < 10) {
+    SMT.showError(pendingTakes
+      ? `The dataset has ${voice.recorded} clips: the clips from your recorded or imported takes aren't saved yet. Review them in 2. Dataset and press ✓ Save, then train.`
+      : `The dataset has ${voice.recorded} clips; at least 10 are needed (50+ recommended). Add clips in 2. Dataset first.`);
+    if (pendingTakes) goToReview();
+    return;
+  }
+  if (voice.recorded < 50 && !confirm(
+    `Only ${voice.recorded} clips in the dataset${pendingClips ? ` (${pendingClips} more are waiting for review, not saved yet)` : ''}. The voice will sound rough. Train anyway?`,
+  )) {
     return;
   }
   try {

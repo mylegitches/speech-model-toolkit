@@ -63,7 +63,7 @@
           <span class="mark" style="left: 30%">300</span>
           <span class="mark" style="left: 100%">1000</span>
         </div>
-        <p class="hint"><strong id="recorded-count">0</strong> clips in the dataset · <span id="readiness-text"></span></p>
+        <p class="hint"><strong id="recorded-count">0</strong> clips in the dataset · <span id="readiness-text"></span><span id="pending-note" class="pending-note hidden"></span></p>
       </div>
 
       <div class="mode-switch" role="tablist">
@@ -151,6 +151,10 @@
     <!-- 3. Train -->
     <section id="train-card" class="card hidden">
       <h2><span class="step">3</span> Train</h2>
+      <div id="train-pending" class="banner banner--warning hidden">
+        <span id="train-pending-text"></span>
+        <button type="button" id="train-pending-btn" class="btn btn--secondary">Go to review</button>
+      </div>
 
       <div class="start-voice">
         <div>

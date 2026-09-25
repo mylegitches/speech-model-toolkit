@@ -121,7 +121,7 @@ Spoken and imported takes wait for your review; nothing is added until you save.
 - **Untick** clips with mistakes, coughs, laughter, music, other voices or people talking over each other.
 - Change **Noise** for the whole take and listen again, if needed.
 
-Then click **✓ Save N clips** to add them to the dataset, or **Discard** to throw the take away. Unfinished reviews are kept, so you can come back later.
+Then click **✓ Save N clips to the dataset** (at the top or bottom of the list) to add them, or **Discard** to throw the take away. **Clips only count once saved**: until then the Dataset counter shows them as *waiting for review*, and the Train step reminds you. Unfinished reviews are kept, so you can come back later.
 
 ---
 
@@ -243,6 +243,7 @@ docker compose logs -f toolkit
 | **"The file is too large… reverse proxy"** | Raise the proxy's upload limit (see below). |
 | **"The connection to the server dropped"** in the Test Lab | Enable **Websockets Support** on your reverse proxy. |
 | **Live logs stop updating** | Turn off proxy buffering (see below); refreshing the page also works. |
+| **Train says the dataset has 0 (or very few) clips** after importing or recording a take | The take's clips aren't saved yet. In **2. Dataset**, open the take (the counter shows *N clips waiting for review*), pick the speaker if asked, and press **✓ Save N clips to the dataset**. |
 | **"The GPU ran out of memory"** | Lower **Batch size** in Advanced settings, or close other programs using the GPU. |
 | **"The server's disk is full"** | Free space in the `data` folder's disk (old takes, voices you don't need). |
 | **Wake word triggers too often / too rarely** | Adjust **Wake word sensitivity** in Settings → Audio, or retrain with a longer phrase. |
