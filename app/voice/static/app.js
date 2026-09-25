@@ -134,6 +134,9 @@ let analyser = null;
 function updateRecorded(count) {
   voice.recorded = count;
   $('#recorded-count').textContent = count;
+  const exportLink = $('#export-dataset');
+  exportLink.href = voiceUrl('/dataset.zip');
+  exportLink.classList.toggle('hidden', !count);
   const fill = $('#readiness-fill');
   fill.style.width = `${Math.min(100, count / 10)}%`;
   let text;

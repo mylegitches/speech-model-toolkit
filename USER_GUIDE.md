@@ -139,6 +139,8 @@ Once the person you want is marked, review the clips of each file, then use **âœ
 
 **Already have a prepared dataset?** Under **Import file**, open *Already have a prepared dataset?* and import a zip with `metadata.csv` (`file|text` per line) plus the audio, or audio files each next to a `.txt` with its transcript. These clips are added as they are.
 
+**Export the dataset.** **â¬‡ Export dataset (.zip)**, next to the clip count, downloads all saved clips: `metadata.csv` (`id|text` per line) and the audio in `wavs/`, the LJSpeech layout that Piper and most TTS trainers use. Use it as a backup, to train elsewhere, or to import into another voice here.
+
 ### Reviewing clips
 
 Spoken and imported takes wait for your review; nothing is added until you save. For every clip:

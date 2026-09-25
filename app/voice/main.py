@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 import zipfile
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from starlette.background import BackgroundTask
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -219,6 +221,24 @@ async def api_upload(name: str, dataset: UploadFile = File(...)) -> Dict[str, An
         raise ValueError("Upload must be a .zip file") from err
 
     return {"imported": imported, "recorded": voice.num_recorded()}
+
+
+@app.get("/api/voices/{name}/dataset.zip")
+async def api_export_dataset(name: str) -> FileResponse:
+    voice = store.get(name)
+    fd, tmp = tempfile.mkstemp(prefix=f"dataset-{voice.name}-", suffix=".zip")
+    os.close(fd)
+    path = Path(tmp)
+    try:
+        count = await asyncio.to_thread(voice.export_zip, path)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    _LOGGER.info("Exported dataset of %s: %d clips, %.1f MB", voice.name, count, path.stat().st_size / 1e6)
+    return FileResponse(
+        path, media_type="application/zip", filename=f"{voice.name}-dataset.zip",
+        background=BackgroundTask(path.unlink, missing_ok=True),
+    )
 
 
 # ---- Freeform recording -------------------------------------------------------

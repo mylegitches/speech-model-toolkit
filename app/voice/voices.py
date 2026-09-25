@@ -12,6 +12,8 @@ import io
 import json
 import re
 import shutil
+import subprocess
+import tempfile
 import time
 import zipfile
 from dataclasses import asdict, dataclass, field, fields
@@ -228,6 +230,62 @@ class Voice:
             )
 
         return imported
+
+
+    def clips(self) -> List[Tuple[Path, str]]:
+        """Every recording with its transcript, as (audio path, text), in a stable order."""
+        if not self.recordings_dir.is_dir():
+            return []
+
+        found = []
+        for text_path in sorted(self.recordings_dir.rglob("*.txt")):
+            audio = next(
+                (p for ext in AUDIO_EXTENSIONS if (p := text_path.with_suffix(ext)).exists()), None
+            )
+            text = text_path.read_text(encoding="utf-8").strip()
+            if audio is not None and text:
+                found.append((audio, text))
+        return found
+
+    def export_zip(self, dest: Path) -> int:
+        """Write the dataset as an LJSpeech-style zip: metadata.csv (id|text) + wavs/<id>.wav.
+
+        WAV recordings are copied as they are; other formats (browser WebM etc.)
+        are converted to 22,050 Hz mono WAV. The zip can be imported again.
+        """
+        clips = self.clips()
+        if not clips:
+            raise ValueError("This voice has no clips in its dataset yet")
+
+        lines = []
+        with zipfile.ZipFile(dest, "w", zipfile.ZIP_STORED, allowZip64=True) as archive, \
+                tempfile.TemporaryDirectory() as tmp:
+            for audio, text in clips:
+                rel = audio.relative_to(self.recordings_dir).with_suffix("")
+                clip_id = re.sub(r"[^\w.-]", "_", "_".join(rel.parts))
+                if audio.suffix.lower() == ".wav":
+                    archive.write(audio, f"wavs/{clip_id}.wav")
+                else:
+                    wav = Path(tmp) / "clip.wav"
+                    result = subprocess.run(
+                        ["ffmpeg", "-v", "error", "-y", "-i", str(audio), "-ac", "1", "-ar", "22050", str(wav)],
+                        capture_output=True, text=True,
+                    )
+                    if result.returncode != 0:
+                        raise RuntimeError(f"Couldn't convert {rel}: {result.stderr.strip()[-300:]}")
+                    archive.write(wav, f"wavs/{clip_id}.wav")
+                lines.append(f"{clip_id}|{' '.join(text.split())}")
+
+            archive.writestr("metadata.csv", "\n".join(lines) + "\n")
+            archive.writestr("voice.json", json.dumps(self.to_json(), indent=2))
+            archive.writestr(
+                "README.txt",
+                f"Dataset of the voice \"{self.name}\" ({self.language}), exported from Speech Model Toolkit.\n"
+                f"{len(lines)} clips. metadata.csv has one line per clip: id|transcript; the audio is wavs/<id>.wav.\n"
+                "This is the LJSpeech layout used by Piper and most TTS trainers. "
+                "Import it again under Voice -> Dataset -> Import file -> Already have a prepared dataset?\n",
+            )
+        return len(lines)
 
 
 class VoiceStore:

@@ -28,6 +28,7 @@
   border-radius: 5px;
   margin-bottom: 1rem;
 }
+.export-link { margin-left: 0.6rem; white-space: nowrap; }
 #readiness-fill { height: 100%; width: 0; border-radius: 5px; background: var(--warning); transition: width 0.3s; }
 .readiness-bar .mark {
   position: absolute;
