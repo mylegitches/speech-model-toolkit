@@ -64,6 +64,11 @@ DENOISE_FILTERS = {
 DENOISE_LEVELS = ("off", "light", "strong")
 _CONTEXT = 0.5  # seconds of audio around a clip so the filters settle before it
 
+# The helper scripts report their result as one JSON line; for a long video
+# (thousands of clips + voice fingerprints) that's far over asyncio's 64 KB
+# default line limit ("Separator is found, but chunk is longer than limit").
+SUBPROCESS_LINE_LIMIT = 256 * 2**20
+
 _live: Dict[str, Dict[str, Any]] = {}  # take id -> take being processed
 _work: Optional[asyncio.Semaphore] = None  # one take at a time (Whisper is CPU-heavy)
 
@@ -102,7 +107,7 @@ def _level(value: Any) -> str:
 def _public(take_id: str, take: Dict[str, Any]) -> Dict[str, Any]:
     if take["state"] == "running" and take_id not in _live:
         # The server restarted while this take was being processed
-        take = {**take, "state": "error", "error": "Interrupted; upload or record it again"}
+        take = {**take, "state": "error", "error": "Interrupted by a restart. Press Try again to process it again."}
     return {"id": take_id, **take, "denoise": _level(take.get("denoise"))}
 
 
@@ -289,6 +294,7 @@ async def _diarize(voice: Voice, take_dir: Path, take: Dict[str, Any], progress:
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "app.voice.diarize", cwd=str(_REPO_DIR),
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        limit=SUBPROCESS_LINE_LIMIT,
     )
     assert proc.stdin is not None and proc.stdout is not None
     proc.stdin.write(json.dumps(request).encode())
@@ -368,6 +374,23 @@ def start(voice: Voice, source: Path, denoise: Any = "light", diarize: bool = Fa
     if len(tracks) > 1:
         _write(take_dir, take)  # wait for the track choice
         return _public(take_id, take)
+    return _begin(voice, take_dir, take)
+
+
+def retry(voice: Voice, take_id: str) -> Dict[str, Any]:
+    """Process a failed or interrupted take again from its uploaded file (no re-upload)."""
+    take_dir = _take_dir(voice, take_id)
+    if take_id in _live:
+        raise RuntimeError("This take is still being processed")
+    take = _public(take_id, _read(take_dir))
+    if take["state"] != "error":
+        raise RuntimeError("Only failed or interrupted takes can be tried again")
+    source = take_dir / take.get("source", "")
+    if not take.get("source") or not source.is_file():
+        raise ValueError("The uploaded file is no longer on the server; import it again")
+    take = {k: v for k, v in take.items() if k not in ("id", "speakers")}
+    take.update(error=None, segments=[], duration=None, model=_model_for(voice))
+    _LOGGER.info("Freeform take %s/%s: trying again", voice.name, take_id)
     return _begin(voice, take_dir, take)
 
 

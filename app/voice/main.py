@@ -279,11 +279,27 @@ class MergeRequest(BaseModel):
     into: str
 
 
+class NotSameRequest(BaseModel):
+    other: str
+
+
+@app.post("/api/voices/{name}/speakers/{person_id}/not-same")
+async def api_person_not_same(name: str, person_id: str, request: NotSameRequest) -> Dict[str, Any]:
+    """Dismiss a "maybe the same person" suggestion."""
+    return speakers.not_same(store.get(name), person_id, request.other)
+
+
 @app.post("/api/voices/{name}/speakers/{person_id}/merge")
 async def api_person_merge(name: str, person_id: str, request: MergeRequest) -> Dict[str, Any]:
     voice = store.get(name)
     return speakers.merge(voice, person_id, request.into,
                           lambda take_id, old, new: freeform.retag_person(voice, take_id, old, new))
+
+
+@app.post("/api/voices/{name}/freeform/{take_id}/retry")
+async def api_freeform_retry(name: str, take_id: str) -> Dict[str, Any]:
+    """Process a failed or interrupted take again from the file already uploaded."""
+    return freeform.retry(store.get(name), take_id)
 
 
 class TrackRequest(BaseModel):

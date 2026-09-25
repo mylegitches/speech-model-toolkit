@@ -134,6 +134,18 @@
 .person select { padding: 0.3rem 0.4rem; font-size: 0.82rem; min-width: 0; flex: 1; }
 .take-foot .hint { flex: 1; min-width: 12rem; align-self: center; }
 
+.person-name { cursor: text; border-bottom: 1px dashed transparent; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.person-name:hover, .person-name:focus { border-bottom-color: var(--muted); outline: none; }
+.name-input { flex: 1; min-width: 0; padding: 0.2rem 0.45rem; font-weight: 600; }
+.person .speaker-head input[type=checkbox] { accent-color: var(--accent-h); width: 1rem; height: 1rem; padding: 0; flex: none; }
+.person.ticked { border-color: var(--warning); }
+.people-tools { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.people-tools input[type=search] { flex: 1; min-width: 10rem; padding: 0.4rem 0.6rem; }
+.maybe-same { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; font-size: 0.8rem; color: #fcd34d;
+  background: rgba(245, 158, 11, 0.08); border-radius: 6px; padding: 0.3rem 0.45rem; }
+.maybe-same span { flex: 1; min-width: 8rem; }
+.maybe-same .btn { padding: 0.2rem 0.5rem; font-size: 0.78rem; min-height: 0; }
+
 /* Audio track chooser */
 .tracks { display: flex; flex-direction: column; gap: 0.6rem; }
 .track-list { display: flex; flex-direction: column; gap: 0.35rem; }

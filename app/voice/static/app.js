@@ -661,6 +661,8 @@ function uploadTake(blob, filename, diarize, denoise, originalName = '', label =
 
 let people = { people: [], target: null };
 let lastTakes = [];
+const peopleUi = { showAll: false, filter: '', selected: new Set() };
+const PEOPLE_SHOWN = 12;  // more than this: the rest behind "Show all"
 
 const personById = (id) => people.people.find((p) => p.id === id);
 
@@ -675,6 +677,8 @@ async function loadPeople() {
   } catch (err) {
     people = { people: [], target: null };
   }
+  const ids = new Set(people.people.map((p) => p.id));
+  peopleUi.selected.forEach((id) => { if (!ids.has(id)) peopleUi.selected.delete(id); });
   renderPeople();
 }
 
@@ -688,7 +692,74 @@ async function updatePerson(person, change) {
     return;
   }
   if ('target' in change) selectTargetEverywhere();
+  // Same name as someone else: probably the same person
+  if (change.name) {
+    const renamed = personById(person.id);
+    const twin = renamed && people.people.find((p) => p.id !== renamed.id
+      && p.name.trim().toLowerCase() === renamed.name.trim().toLowerCase());
+    if (twin && confirm(`“${twin.name}” already exists. Are they the same person? OK merges them into one.`)) {
+      await mergePeople([renamed.id], twin.id);
+      return;
+    }
+  }
   refreshTakeCards();
+}
+
+/** Merge several people into one; the takes' speakers follow. */
+async function mergePeople(fromIds, intoId) {
+  for (const id of fromIds.filter((x) => x !== intoId)) {
+    try {
+      people = await postJson(voiceUrl(`/speakers/${id}/merge`), { into: intoId });
+    } catch (err) {
+      SMT.showError(err.message);
+      break;
+    }
+    lastTakes.forEach((t) => (t.speakers || []).forEach((s) => { if (s.person === id) s.person = intoId; }));
+    peopleUi.selected.delete(id);
+  }
+  selectTargetEverywhere();
+  refreshTakeCards();
+}
+
+async function dismissSimilar(person, otherId) {
+  try {
+    people = await postJson(voiceUrl(`/speakers/${person.id}/not-same`), { other: otherId });
+  } catch (err) {
+    SMT.showError(err.message);
+    return;
+  }
+  renderPeople();
+}
+
+/** Click a name to rename it in place (Enter saves, Esc cancels). */
+function editableName(person, tag = 'strong') {
+  const label = el(tag, { className: 'person-name', textContent: person.name, title: 'Click to rename' });
+  label.tabIndex = 0;
+  const startEditing = () => {
+    const input = el('input', { type: 'text', className: 'name-input', value: person.name, maxLength: 40 });
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      const value = input.value.trim();
+      input.replaceWith(label);
+      if (save && value && value !== person.name) {
+        label.textContent = value;
+        updatePerson(person, { name: value });
+      }
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
+    label.replaceWith(input);
+    input.focus();
+    input.select();
+  };
+  label.addEventListener('click', startEditing);
+  label.addEventListener('keydown', (e) => { if (e.key === 'Enter') startEditing(); });
+  return label;
 }
 
 function selectTargetEverywhere() {
@@ -721,6 +792,80 @@ function targetClips() {
   return out;
 }
 
+function personCard(person) {
+  const isTarget = person.id === people.target;
+  const selected = peopleUi.selected.has(person.id);
+  const card = el('div', { className: `person${isTarget ? ' selected' : ''}${selected ? ' ticked' : ''}` });
+
+  const tick = el('input', { type: 'checkbox', checked: selected, title: 'Select to merge several people' });
+  tick.addEventListener('change', () => {
+    if (tick.checked) peopleUi.selected.add(person.id); else peopleUi.selected.delete(person.id);
+    renderPeople();
+  });
+  const head = el('div', { className: 'speaker-head' }, tick, editableName(person));
+  if (isTarget) head.append(el('span', { className: 'pill pill--ok', textContent: 'The voice' }));
+  card.append(head);
+  card.append(el('small', {
+    className: 'hint',
+    textContent: `${clock(person.seconds)} of speech · in ${person.takes.length} file${person.takes.length === 1 ? '' : 's'}`,
+  }));
+
+  const actions = el('div', { className: 'samples' });
+  const sampleTake = person.sample && lastTakes.find((t) => t.id === person.sample.take && t.state === 'done');
+  if (sampleTake) {
+    const play = el('button', { type: 'button', className: 'btn btn--secondary', textContent: '▶', title: 'Hear them' });
+    play.addEventListener('click', () => playClip(sampleTake, person.sample.index, play));
+    actions.append(play);
+  }
+  const pick = el('button', {
+    type: 'button', className: `btn ${isTarget ? 'btn--primary' : 'btn--secondary'}`,
+    textContent: isTarget ? '✓ The voice I want' : 'This is the voice',
+  });
+  pick.addEventListener('click', () => updatePerson(person, { target: !isTarget }));
+  actions.append(pick);
+  const others = people.people.filter((p) => p.id !== person.id);
+  if (others.length) {
+    const merge = el('select', { title: 'The same person was found twice? Merge them.' },
+      new Option('Same as…', ''), ...others.map((p) => new Option(p.name, p.id)));
+    merge.addEventListener('change', async () => {
+      const into = personById(merge.value);
+      if (!into || !confirm(`Merge “${person.name}” into “${into.name}”? They'll be one person in every file.`)) {
+        merge.value = '';
+        return;
+      }
+      await mergePeople([person.id], into.id);
+    });
+    actions.append(merge);
+  }
+  card.append(actions);
+
+  // Possibly the same person, found separately (e.g. split within a file)
+  for (const hint of (person.similar || []).slice(0, 2)) {
+    const other = personById(hint.id);
+    if (!other) continue;
+    const row = el('div', { className: 'maybe-same' });
+    row.append(el('span', { textContent: `Maybe the same as ${other.name} (${Math.round(hint.score * 100)}%)` }));
+    const otherTake = other.sample && lastTakes.find((t) => t.id === other.sample.take && t.state === 'done');
+    if (otherTake) {
+      const play = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '▶', title: `Hear ${other.name}` });
+      play.addEventListener('click', () => playClip(otherTake, other.sample.index, play));
+      row.append(play);
+    }
+    const yes = el('button', { type: 'button', className: 'btn btn--secondary', textContent: 'Merge' });
+    yes.addEventListener('click', () => {
+      // Keep the one with more speech (and its name), unless the other is named or chosen
+      const keepOther = other.id === people.target || (other.seconds >= person.seconds && person.id !== people.target);
+      const [from, into] = keepOther ? [person, other] : [other, person];
+      mergePeople([from.id], into.id);
+    });
+    const no = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Not the same' });
+    no.addEventListener('click', () => dismissSimilar(person, other.id));
+    row.append(yes, no);
+    card.append(row);
+  }
+  return card;
+}
+
 function renderPeople() {
   const box = $('#people-panel');
   box.innerHTML = '';
@@ -729,68 +874,72 @@ function renderPeople() {
   if (!list.length) return;
 
   const multi = lastTakes.filter((t) => t.speakers).length > 1;
+  const suggestions = list.filter((p) => (p.similar || []).length).length;
   box.append(el('div', { className: 'people-head' },
-    el('strong', { textContent: 'People in your files' }),
+    el('strong', { textContent: `People in your files (${list.length})` }),
     el('span', {
       className: 'hint',
-      textContent: multi ? 'Recognised across files by their voice. Name them, and mark the one you want.' : 'Name them, and mark the one you want: they’re recognised in the next files you import.',
+      textContent: (multi ? 'Recognised across files by their voice. ' : '')
+        + 'Click a name to rename. Mark the voice you want'
+        + (suggestions ? '; “Maybe the same as” flags people who may have been split in two.' : '.'),
     })));
-  const grid = el('div', { className: 'people' });
-  const sorted = [...list].sort((a, b) => (b.id === people.target) - (a.id === people.target) || b.seconds - a.seconds);
-  for (const person of sorted) {
-    const isTarget = person.id === people.target;
-    const card = el('div', { className: `person${isTarget ? ' selected' : ''}` });
-    const name = el('strong', { textContent: person.name, title: 'Rename' });
-    const rename = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '✏️', title: 'Rename' });
-    rename.addEventListener('click', () => {
-      const value = window.prompt('Name this person', person.name);  // "prompt" is the sentence being read
-      if (value !== null && value.trim()) updatePerson(person, { name: value });
+
+  // Tools for long lists: search, and merging several at once
+  const tools = el('div', { className: 'people-tools' });
+  if (list.length > 8) {
+    const search = el('input', { type: 'search', placeholder: 'Find a person…', value: peopleUi.filter });
+    search.addEventListener('input', () => {
+      peopleUi.filter = search.value;
+      const pos = search.selectionStart;
+      renderPeople();
+      const again = $('#people-panel input[type=search]');
+      again.focus();
+      again.setSelectionRange(pos, pos);
     });
-    card.append(el('div', { className: 'speaker-head' }, name, rename));
-    card.append(el('small', {
-      className: 'hint',
-      textContent: `${clock(person.seconds)} of speech · in ${person.takes.length} file${person.takes.length === 1 ? '' : 's'}`,
-    }));
-    const actions = el('div', { className: 'samples' });
-    const sampleTake = person.sample && lastTakes.find((t) => t.id === person.sample.take && t.state === 'done');
-    if (sampleTake) {
-      const play = el('button', { type: 'button', className: 'btn btn--secondary', textContent: '▶' });
-      play.addEventListener('click', () => playClip(sampleTake, person.sample.index, play));
-      actions.append(play);
-    }
-    const pick = el('button', {
-      type: 'button', className: `btn ${isTarget ? 'btn--primary' : 'btn--secondary'}`,
-      textContent: isTarget ? '✓ The voice I want' : 'This is the voice',
-    });
-    pick.addEventListener('click', () => updatePerson(person, { target: !isTarget }));
-    actions.append(pick);
-    const others = people.people.filter((p) => p.id !== person.id);
-    if (others.length) {
-      const merge = el('select', { title: 'The same person was found twice? Merge them.' },
-        new Option('Same as…', ''), ...others.map((p) => new Option(p.name, p.id)));
-      merge.addEventListener('change', async () => {
-        const into = personById(merge.value);
-        if (!into || !confirm(`Merge “${person.name}” into “${into.name}”? They'll be treated as one person in every file.`)) {
-          merge.value = '';
-          return;
-        }
-        try {
-          people = await postJson(voiceUrl(`/speakers/${person.id}/merge`), { into: into.id });
-        } catch (err) {
-          SMT.showError(err.message);
-          return;
-        }
-        // Takes' speakers now point at the merged person
-        lastTakes.forEach((t) => (t.speakers || []).forEach((s) => { if (s.person === person.id) s.person = into.id; }));
-        selectTargetEverywhere();
-        refreshTakeCards();
-      });
-      actions.append(merge);
-    }
-    card.append(actions);
-    grid.append(card);
+    tools.append(search);
   }
+  const ticked = [...peopleUi.selected].map(personById).filter(Boolean);
+  if (ticked.length >= 2) {
+    const into = [...ticked].sort((a, b) => (b.id === people.target) - (a.id === people.target) || b.seconds - a.seconds)[0];
+    const mergeBtn = el('button', {
+      type: 'button', className: 'btn btn--primary',
+      textContent: `Merge ${ticked.length} selected into “${into.name}”`,
+    });
+    mergeBtn.addEventListener('click', () => {
+      if (confirm(`Merge ${ticked.map((p) => p.name).join(', ')} into “${into.name}”? They'll be one person in every file.`)) {
+        mergePeople(ticked.map((p) => p.id), into.id);
+      }
+    });
+    const clear = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Clear selection' });
+    clear.addEventListener('click', () => { peopleUi.selected.clear(); renderPeople(); });
+    tools.append(mergeBtn, clear);
+  } else if (list.length > 2) {
+    tools.append(el('span', { className: 'hint', textContent: 'Tick two or more to merge them.' }));
+  }
+  if (tools.childNodes.length) box.append(tools);
+
+  const needle = peopleUi.filter.trim().toLowerCase();
+  const sorted = [...list]
+    .filter((p) => !needle || p.name.toLowerCase().includes(needle))
+    .sort((a, b) => (b.id === people.target) - (a.id === people.target)
+      || peopleUi.selected.has(b.id) - peopleUi.selected.has(a.id)
+      || b.seconds - a.seconds);
+  const shown = needle || peopleUi.showAll ? sorted : sorted.slice(0, PEOPLE_SHOWN);
+  const grid = el('div', { className: 'people' });
+  shown.forEach((person) => grid.append(personCard(person)));
   box.append(grid);
+  if (shown.length < sorted.length) {
+    const more = el('button', {
+      type: 'button', className: 'btn btn--ghost',
+      textContent: `Show all ${sorted.length} people (${sorted.length - shown.length} more with less speech)`,
+    });
+    more.addEventListener('click', () => { peopleUi.showAll = true; renderPeople(); });
+    box.append(more);
+  } else if (peopleUi.showAll && sorted.length > PEOPLE_SHOWN && !needle) {
+    const less = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Show fewer' });
+    less.addEventListener('click', () => { peopleUi.showAll = false; renderPeople(); });
+    box.append(less);
+  }
 
   const target = personById(people.target);
   if (target) {
@@ -960,7 +1109,21 @@ function renderTake(take) {
     return box;
   }
   if (take.state === 'error') {
-    head.append(discard);
+    const retry = el('button', { type: 'button', className: 'btn btn--secondary', textContent: '↻ Try again' });
+    retry.title = 'Process it again from the file already uploaded';
+    retry.addEventListener('click', async () => {
+      retry.disabled = true;
+      try {
+        await postJson(voiceUrl(`/freeform/${take.id}/retry`), {});
+      } catch (err) {
+        SMT.showError(err.message);
+        retry.disabled = false;
+        return;
+      }
+      delete renderedTakes[take.id];
+      loadTakes();
+    });
+    head.append(retry, discard);
     box.append(el('div', { className: 'banner banner--error', textContent: take.error || 'Transcription failed' }));
     return box;
   }
@@ -1022,8 +1185,9 @@ function renderTake(take) {
     for (const speaker of take.speakers) {
       const chosen = edits.speakers.has(speaker.id);
       const card = el('div', { className: `speaker${chosen ? ' selected' : ''}` });
-      const head2 = el('div', { className: 'speaker-head' }, el('strong', { textContent: displayName(speaker) }));
       const person = speaker.person && personById(speaker.person);
+      const head2 = el('div', { className: 'speaker-head' },
+        person ? editableName(person) : el('strong', { textContent: displayName(speaker) }));
       if (person && person.id === people.target) {
         head2.append(el('span', { className: 'pill pill--ok', textContent: 'The voice I want' }));
       } else if (person && person.takes.length > 1) {

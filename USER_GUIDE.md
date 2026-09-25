@@ -117,9 +117,11 @@ Use recordings you already have: voice memos, podcasts, interviews, movies or a 
 
 Every file is compared with the people found in your earlier files, so the same person keeps the same name everywhere: their card in each file says *also in N other files*. Above the takes, **People in your files** lists everyone found so far:
 
-- **✏️** renames a person (e.g. "Jerry"). The name then shows in every file.
+- **Click a name** to rename that person (e.g. "Jerry"), in the panel or on a speaker card in a file; Enter saves, Esc cancels. The name then shows in every file. Giving two people the same name offers to merge them.
 - **This is the voice** marks the person you want. They're preselected in every file already imported and every file you import later.
-- **Same as…** merges two entries that are really one person.
+- **Maybe the same as …** appears when two entries sound alike (one person split in two, e.g. shouting vs. calm). ▶ to compare, then **Merge** or **Not the same** (the suggestion goes away for good).
+- **Tick two or more cards** and **Merge selected** to combine them (they go into the one with the most speech), or use **Same as…** on a card.
+- With many people, **Find a person…** searches by name, and people with little speech are behind **Show all**.
 - **▶** plays one of their clips.
 
 Once the person you want is marked, review the clips of each file, then use **✓ Save *name*'s clips from all files** to add all of them to the dataset at once. Unticked clips stay out.
@@ -265,7 +267,8 @@ docker compose logs -f toolkit
 | **Wake word triggers too often / too rarely** | Adjust **Wake word sensitivity** in Settings → Audio, or retrain with a longer phrase. |
 | **The voice sounds robotic** | Add more clips (300+), check transcripts are exact, train longer. |
 | **Wrong language picked from a movie** | Discard the take and import again; choose the right track when asked. |
-| **Two cards for the same person** | In one file: select both with **Use this voice**. Across files: in **People in your files**, use **Same as…** to merge them. |
+| **Two cards for the same person** | In **People in your files**: use **Merge** on the *Maybe the same as* suggestion, tick both and **Merge selected**, or give them the same name. In one file you can also just select both with **Use this voice**. |
+| **A file failed or was interrupted by a restart** | Press **↻ Try again** on it: it's processed again from the file already uploaded. |
 | **Folder import doesn't offer a folder button / drag and drop** | Use a desktop browser (Chrome, Edge, Firefox, Safari); phones can only pick single files. |
 | **"This file has no audio track"** | The file only has video; use another copy. |
 

@@ -3,7 +3,8 @@
 voices/<name>/speakers.json:
   {"people": [{"id": "p1", "name": "Person 1", "centroid": [...], "seconds": 123.4,
                "takes": ["<take id>", ...], "sample": {"take": id, "index": n} | null}],
-   "target": "p1" | null}   # "This is the voice": preselected in every take
+   "target": "p1" | null,   # "This is the voice": preselected in every take
+   "notSame": [["p1", "p4"], ...]}   # suggestions the user said are different people
 
 Each take is diarized on its own (diarize.py). Afterwards every speaker in the
 take is compared with the people already known, using the mean ECAPA voice
@@ -30,6 +31,13 @@ SAME_PERSON = 0.5
 Fingerprints of one person from different recordings typically score 0.6-0.9,
 different people below 0.35."""
 
+MAYBE_SAME = 0.4
+"""Similarity above which two people are suggested as possibly the same.
+
+Diarization within one file can split a person (shouting vs. whispering, a
+phone call); those halves never merge automatically because a file's speakers
+are kept apart, so similar pairs are offered to the user instead."""
+
 _lock = threading.Lock()
 
 
@@ -44,6 +52,7 @@ def load(voice: Voice) -> Dict[str, Any]:
         data = {}
     data.setdefault("people", [])
     data.setdefault("target", None)
+    data.setdefault("notSame", [])
     return data
 
 
@@ -53,13 +62,48 @@ def _save(voice: Voice, data: Dict[str, Any]) -> None:
     tmp.replace(_path(voice))
 
 
+def _suggestions(data: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    """For each person, others who might be the same person (best first)."""
+    people = [p for p in data["people"] if p.get("centroid")]
+    dismissed = {frozenset(pair) for pair in data["notSame"]}
+    out: Dict[str, List[Dict[str, Any]]] = {p["id"]: [] for p in data["people"]}
+    if len(people) < 2:
+        return out
+    matrix = np.stack([_unit(p["centroid"]) for p in people])
+    scores = matrix @ matrix.T
+    for i, a in enumerate(people):
+        for j, b in enumerate(people):
+            if i != j and scores[i, j] >= MAYBE_SAME and frozenset((a["id"], b["id"])) not in dismissed:
+                out[a["id"]].append({"id": b["id"], "score": round(float(scores[i, j]), 3)})
+        out[a["id"]].sort(key=lambda s: -s["score"])
+    return out
+
+
 def public(voice: Voice) -> Dict[str, Any]:
     """The people without their fingerprints (what the page needs)."""
     data = load(voice)
+    similar = _suggestions(data)
     return {
         "target": data["target"],
-        "people": [{k: v for k, v in p.items() if k != "centroid"} for p in data["people"]],
+        "people": [
+            {**{k: v for k, v in p.items() if k != "centroid"}, "similar": similar.get(p["id"], [])}
+            for p in data["people"]
+        ],
     }
+
+
+def not_same(voice: Voice, person_id: str, other_id: str) -> Dict[str, Any]:
+    """Stop suggesting that two people might be the same."""
+    with _lock:
+        data = load(voice)
+        ids = {p["id"] for p in data["people"]}
+        if person_id not in ids or other_id not in ids:
+            raise KeyError("No such person")
+        pair = sorted([person_id, other_id])
+        if pair not in data["notSame"]:
+            data["notSame"].append(pair)
+        _save(voice, data)
+    return public(voice)
 
 
 def _unit(vector: List[float]) -> np.ndarray:
@@ -160,6 +204,9 @@ def merge(voice: Voice, person_id: str, into_id: str, retag: Any) -> Dict[str, A
         data["people"] = [p for p in data["people"] if p["id"] != person_id]
         if data["target"] == person_id:
             data["target"] = into_id
+        # Pairs involving the merged person now apply to the one it went into
+        pairs = {tuple(sorted(into_id if x == person_id else x for x in pair)) for pair in data["notSame"]}
+        data["notSame"] = [list(p) for p in pairs if p[0] != p[1]]
         _save(voice, data)
     for take_id in source["takes"]:
         retag(take_id, person_id, into_id)

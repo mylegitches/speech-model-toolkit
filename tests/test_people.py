@@ -75,3 +75,24 @@ def test_rename_target_and_merge(voice):
         speakers.update(voice, bob, name="   ")
     with pytest.raises(KeyError):
         speakers.update(voice, "p99", name="x")
+
+
+def test_split_person_is_suggested_and_can_be_dismissed(voice):
+    # One file where the same person came out as two speakers (e.g. shouting vs. calm)
+    split = take((ALICE, 30), (ALICE, 20), (BOB, 40))
+    speakers.link(voice, "t1", split)
+    a1, a2, bob = (s["person"] for s in split["speakers"])
+    assert len({a1, a2, bob}) == 3  # kept apart within a file
+
+    people = {p["id"]: p for p in speakers.public(voice)["people"]}
+    assert people[a1]["similar"][0]["id"] == a2
+    assert all(s["id"] != bob for s in people[a1]["similar"])
+
+    speakers.not_same(voice, a1, a2)
+    people = {p["id"]: p for p in speakers.public(voice)["people"]}
+    assert people[a1]["similar"] == [] and people[a2]["similar"] == []
+
+    # Merging carries the "not the same" answer over to the merged person
+    speakers.merge(voice, a2, bob, lambda *args: None)
+    people = {p["id"]: p for p in speakers.public(voice)["people"]}
+    assert all(s["id"] != bob for s in people[a1]["similar"])

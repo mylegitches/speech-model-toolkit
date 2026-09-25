@@ -89,6 +89,7 @@ async def find(
         "-m",
         "app.voice.speaker_match",
         cwd=str(_REPO_DIR),
+        limit=256 * 2**20,  # the result is one (possibly long) JSON line
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
