@@ -64,11 +64,35 @@ else:
     print(json.dumps({"gpu": None, "memory_gb": 0}))
 """
 
-# Runs "python3 -m piper.train" without the val_mos checkpoint callback.
-# The MOS predictor is downloaded on first use; when that fails (offline) the
-# callback aborts training after the first validation. We export by listening
-# to the latest checkpoint instead, so it isn't needed.
-_TRAIN_SCRIPT = """
+# Since PyTorch 2.6, torch.load only unpickles tensors unless told otherwise
+# (weights_only=True), and Lightning 2.6 leaves that default to PyTorch. Piper
+# checkpoints also store their training config, which includes pathlib paths,
+# so loading a starting voice or "Train more" failed with "Unsupported global:
+# GLOBAL pathlib.PosixPath". Allowlist exactly those types instead of turning
+# the protection off (a Windows-made checkpoint holds WindowsPath, which can't
+# be created on Linux, so its pure variant covers it).
+_SAFE_GLOBALS = """
+import pathlib, torch
+if hasattr(torch.serialization, "add_safe_globals"):
+    torch.serialization.add_safe_globals(
+        [pathlib.PosixPath, pathlib.PurePosixPath, pathlib.PureWindowsPath]
+    )
+"""
+
+# Runs "python3 -m piper.train" the way piper1-gpl's fine-tuning expects:
+#  - without the val_mos checkpoint callback: the MOS predictor is downloaded
+#    on first use and, when that fails (offline), aborts training after the
+#    first validation. We export by listening to the latest checkpoint instead.
+#  - without LightningCLI's ckpt_path hyperparameter parsing (Lightning 2.5+):
+#    it copies the *starting voice's* stored settings over this run's, and older
+#    pretrained checkpoints carry settings current Piper no longer has
+#    ("Subcommand 'fit' does not accept option 'model.sample_bytes'"). The
+#    checkpoint is still loaded for its weights, as Piper intends.
+_TRAIN_SCRIPT = _SAFE_GLOBALS + """
+from lightning.pytorch.cli import LightningCLI
+if hasattr(LightningCLI, "_parse_ckpt_path"):
+    LightningCLI._parse_ckpt_path = lambda self: None
+
 import piper.train.__main__ as train_main
 callbacks = getattr(train_main, "_DEFAULT_CALLBACKS", [])
 callbacks[:] = [c for c in callbacks if getattr(c, "monitor", None) != "val_mos"]
@@ -78,7 +102,7 @@ train_main.main()
 # Runs "python3 -m piper.train.export_onnx" with the TorchScript-based exporter.
 # Since torch 2.9 torch.onnx.export defaults to dynamo=True, which fails on
 # Piper's model (piper1-gpl allows any torch 2.x).
-_EXPORT_SCRIPT = """
+_EXPORT_SCRIPT = _SAFE_GLOBALS + """
 import inspect, torch
 _export = torch.onnx.export
 def export(*args, **kwargs):
@@ -582,12 +606,14 @@ class TrainingManager:
             self._check_running(ws)
             max_epochs = -1
             if settings.epochs > 0:
-                base_epoch = 0
+                done_epochs = 0
                 if checkpoint_path is not None:
-                    base_epoch = await self._checkpoint_epoch(ws, checkpoint_path)
+                    # A checkpoint stores the 0-based index of its last finished
+                    # epoch, so epoch=2164 means 2165 epochs are already done
+                    done_epochs = await self._checkpoint_epoch(ws, checkpoint_path) + 1
 
-                # Epochs continue counting from the checkpoint
-                max_epochs = base_epoch + settings.epochs
+                # Lightning's max_epochs counts from the checkpoint's epochs
+                max_epochs = done_epochs + settings.epochs
 
             batch_size = settings.batch_size or self.default_batch_size(
                 settings.accelerator
