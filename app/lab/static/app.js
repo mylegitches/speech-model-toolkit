@@ -24,7 +24,7 @@ let detectionTimer = null;
 // ---- Setup ------------------------------------------------------------------------
 
 async function loadOptions() {
-  options = await (await fetch('api/options')).json();
+  options = await SMT.request('api/options');
 
   const ww = $('#wakeword-select');
   const keepWw = ww.value || SMT_lab('wakeword');
@@ -95,7 +95,7 @@ async function start() {
       autoGainControl: options.audio.autoGainControl,
     });
   } catch (err) {
-    note(`Microphone error: ${err.message}`, true);
+    note(SMT.micError(err), true);
     stop();
     return;
   }
@@ -109,12 +109,21 @@ async function start() {
     try {
       await startCapture();
     } catch (err) {
-      note(`Microphone error: ${err.message}`, true);
+      note(SMT.micError(err), true);
       stop();
     }
   };
   ws.onmessage = (evt) => onMessage(JSON.parse(evt.data));
-  ws.onclose = () => { if (ws) stop(); };
+  ws.onclose = (evt) => {
+    if (!ws) return;  // we stopped it
+    // Closed by the server or the network, not by the Stop button
+    if (evt.code !== 1000) {
+      note(evt.code === 1006
+        ? 'The connection to the server dropped. If this happens right away behind a reverse proxy, enable WebSocket support there.'
+        : `The server ended the session${evt.reason ? `: ${evt.reason}` : ''}.`, true);
+    }
+    stop();
+  };
 
   $('#start-btn').textContent = '⏹ Stop';
   $('#start-btn').classList.add('listening');
@@ -306,7 +315,7 @@ $('#ask-form').addEventListener('submit', async (e) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, voice: $('#voice-select').value, history: priorHistory }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw new Error(await SMT.errorMessage(res));
     const data = await res.json();
     if (data.error) note(data.error, true);
     addReply(data.reply, data.audioUrl, false);

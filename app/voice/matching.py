@@ -7,13 +7,17 @@ voices/<name>/voice-match.json.
 
 import asyncio
 import json
+import logging
 import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from .training import catalog_groups, load_checkpoint_catalog
+from ..errors import explain_failure
 from .voices import AUDIO_EXTENSIONS, Voice
+
+_LOGGER = logging.getLogger(__name__)
 
 MIN_RECORDINGS = 5
 """Fewer than this and a match isn't reliable (training falls back to the default pick)."""
@@ -73,6 +77,8 @@ async def find(
     if len(paths) < MIN_RECORDINGS:
         raise RuntimeError(f"Record at least {MIN_RECORDINGS} sentences first")
 
+    _LOGGER.info("Auto-detect for %s: %d recordings vs %d starting voices", voice.name, len(paths), len(options))
+    started = time.monotonic()
     request = {
         "recordings": [str(p) for p in paths],
         "candidates": options,
@@ -103,7 +109,8 @@ async def find(
             tail = (tail + [line])[-5:]  # library output: only shown if it fails
     await proc.wait()
     if proc.returncode != 0 or result is None:
-        raise RuntimeError("Voice matching failed: " + (tail[-1] if tail else f"exit {proc.returncode}"))
+        _LOGGER.error("Auto-detect for %s failed (exit %s): %s", voice.name, proc.returncode, " | ".join(tail))
+        raise RuntimeError(explain_failure("Comparing voices", proc.returncode, tail))
 
     results = sorted(
         (
@@ -124,4 +131,7 @@ async def find(
         "at": time.time(),
     }
     _cache_file(voice).write_text(json.dumps(match, indent=2), encoding="utf-8")
+    _LOGGER.info("Auto-detect for %s in %.0fs: best %s (%.2f), next %s", voice.name, time.monotonic() - started,
+                 results[0]["name"], results[0]["score"],
+                 f"{results[1]['name']} ({results[1]['score']:.2f})" if len(results) > 1 else "none")
     return match

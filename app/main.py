@@ -8,7 +8,10 @@
   /settings/   AI connections, speech recognition and audio (app/settings)
 """
 
+import logging
 import mimetypes
+import os
+import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict
@@ -17,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import errors
 from .lab import main as lab
 from .settings import main as settings
 from .settings import providers
@@ -25,6 +29,8 @@ from .voice import main as voice
 from .wakeword import main as wakeword
 from .wakeword import pipeline as ww
 
+errors.setup_logging()
+_LOGGER = logging.getLogger("app")
 _DIR = Path(__file__).parent
 
 # Not in every system mime table; browsers want this type for the web app manifest
@@ -33,9 +39,19 @@ mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Large uploads (movies) spool to $TMPDIR: keep it on the data volume
+    if os.environ.get("TMPDIR"):
+        os.makedirs(os.environ["TMPDIR"], exist_ok=True)
+        tempfile.tempdir = None  # re-read TMPDIR now that it exists
     # Mounted sub-apps don't get lifespan events, so run their startup here
     await wakeword.startup()
     await voice.startup()
+    device = voice.trainer.device
+    _LOGGER.info(
+        "Speech Model Toolkit ready. Voice training: %s",
+        (f"GPU {device['gpu']} ({device['memory_gb']} GB)" if device.get("gpu") else "CPU only")
+        if device.get("ok") else f"NOT AVAILABLE ({device.get('problem', 'unknown')[:200]})",
+    )
     yield
 
 

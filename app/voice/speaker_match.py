@@ -20,7 +20,7 @@ import sys
 import urllib.request
 import warnings
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import numpy as np
 
@@ -52,12 +52,9 @@ def decode(path: str) -> Optional[np.ndarray]:
     return audio[: int(MAX_SECONDS * SAMPLE_RATE)]
 
 
-def main() -> None:
+def load_embedder(cache_dir: Path) -> Callable[[np.ndarray], np.ndarray]:
+    """16 kHz float audio -> unit-length speaker embedding (ECAPA, CPU)."""
     warnings.filterwarnings("ignore")  # torch/speechbrain deprecation noise
-    request = json.load(sys.stdin)
-    cache_dir = Path(request["cache_dir"])
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
     import torch
     from speechbrain.pretrained import EncoderClassifier
 
@@ -73,17 +70,29 @@ def main() -> None:
             vector = encoder.encode_batch(torch.from_numpy(audio)[None, :]).squeeze().numpy()
         return vector / (np.linalg.norm(vector) + 1e-9)
 
-    # Your voice
-    vectors: List[np.ndarray] = []
-    for path in request["recordings"]:
-        audio = decode(path)
-        if audio is not None:
-            vectors.append(embed(audio))
+    return embed
+
+
+def voice_embedding(paths: List[str], embed: Callable[[np.ndarray], np.ndarray]) -> Optional[np.ndarray]:
+    """Mean embedding of a voice's recordings (None if none could be read)."""
+    vectors = [embed(audio) for audio in (decode(p) for p in paths) if audio is not None]
     if not vectors:
-        raise SystemExit("None of the recordings could be read")
+        return None
     log(f"Analysed {len(vectors)} recordings")
-    mine = np.mean(vectors, axis=0)
-    mine /= np.linalg.norm(mine) + 1e-9
+    mean = np.mean(vectors, axis=0)
+    return mean / (np.linalg.norm(mean) + 1e-9)
+
+
+def main() -> None:
+    request = json.load(sys.stdin)
+    cache_dir = Path(request["cache_dir"])
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    embed = load_embedder(cache_dir)
+
+    # Your voice
+    mine = voice_embedding(request["recordings"], embed)
+    if mine is None:
+        raise SystemExit("None of the recordings could be read")
 
     # Candidates (embeddings cached by sample URL)
     cache_file = cache_dir / "sample-embeddings.json"

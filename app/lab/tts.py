@@ -85,5 +85,11 @@ async def model_path(voice_id: str) -> Path:
 
 async def synthesize(voice_id: str, text: str) -> bytes:
     """WAV bytes of text spoken by the chosen voice."""
-    path = await model_path(voice_id)
-    return await voice_app.trainer.synthesize(path, text)
+    try:
+        path = await model_path(voice_id)
+    except OSError as err:
+        raise RuntimeError(f"Could not download the default voice ({err}). Check the server's internet connection.") from err
+    try:
+        return await voice_app.trainer.synthesize(path, text)
+    except RuntimeError as err:
+        raise RuntimeError(f"Piper could not speak with {path.name}: {str(err).strip().splitlines()[-1] if str(err).strip() else 'unknown error'}") from err

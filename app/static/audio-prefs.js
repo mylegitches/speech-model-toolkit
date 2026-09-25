@@ -121,5 +121,81 @@
     if (wantAwake && document.visibilityState === 'visible') keepAwake(true);
   });
 
-  window.SMT = { get, set, serverSettings, openMic, applyOutput, applyDownloads, unlockAudio, keepAwake };
+  // ---- Errors ----------------------------------------------------------------
+
+  /** A readable message for a failed response (server text, JSON detail, or proxy trouble). */
+  async function errorMessage(res) {
+    if (res.status === 413) {
+      return 'The file is too large for the server or your reverse proxy (raise its upload limit, e.g. nginx client_max_body_size).';
+    }
+    if ([502, 503, 504].includes(res.status)) {
+      return `The server didn't respond (HTTP ${res.status}). It may be restarting, or a reverse proxy timed out. Try again in a moment.`;
+    }
+    let text = '';
+    try { text = await res.text(); } catch (e) { /* no body */ }
+    try {
+      const data = JSON.parse(text);
+      const detail = data.detail ?? data.error ?? data.message;
+      if (Array.isArray(detail)) text = detail.map((d) => d.msg || JSON.stringify(d)).join('; ');
+      else if (detail) text = String(detail);
+    } catch (e) { /* plain text */ }
+    return text.trim() || `Request failed (HTTP ${res.status} ${res.statusText})`;
+  }
+
+  /** fetch that throws Error(readable message) and returns JSON (or a Blob for audio/files). */
+  async function request(url, options = {}) {
+    let res;
+    try {
+      res = await fetch(url, options);
+    } catch (e) {
+      throw new Error("Can't reach the server. Check your connection and that the container is running.");
+    }
+    if (!res.ok) throw new Error(await errorMessage(res));
+    const type = res.headers.get('content-type') || '';
+    return type.includes('json') ? res.json() : res.blob();
+  }
+
+  /** What to do about a failed getUserMedia(). */
+  function micError(err) {
+    const name = err && err.name;
+    if (!window.isSecureContext) {
+      return 'The microphone only works on HTTPS or http://localhost. Open this page through HTTPS (e.g. your reverse proxy) or an SSH tunnel.';
+    }
+    if (name === 'NotAllowedError' || name === 'SecurityError') {
+      return 'Microphone access is blocked. Allow it in the browser (the icon next to the address bar), then try again.';
+    }
+    if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+      return 'No microphone was found. Plug one in, or pick another one in Settings → Audio.';
+    }
+    if (name === 'NotReadableError' || name === 'AbortError') {
+      return 'The microphone is in use by another app or tab, or the system blocked it. Close the other app and try again.';
+    }
+    return `Microphone error: ${(err && err.message) || err}`;
+  }
+
+  /** Show an error as a dismissable toast at the bottom of the page. */
+  function showError(message) {
+    console.error(message);
+    const toast = document.createElement('div');
+    toast.className = 'smt-toast';
+    toast.setAttribute('role', 'alert');
+    toast.textContent = message;
+    toast.title = 'Click to dismiss';
+    toast.addEventListener('click', () => toast.remove());
+    document.body.append(toast);
+    setTimeout(() => toast.remove(), 10000);
+  }
+
+  // Anything nobody caught still gets reported instead of failing silently
+  window.addEventListener('unhandledrejection', (e) => {
+    showError(e.reason?.message || String(e.reason || 'Something went wrong'));
+  });
+  window.addEventListener('error', (e) => {
+    if (e.message) showError(`Something went wrong on this page: ${e.message}`);
+  });
+
+  window.SMT = {
+    get, set, serverSettings, openMic, applyOutput, applyDownloads, unlockAudio, keepAwake,
+    errorMessage, request, showError, micError,
+  };
 })();

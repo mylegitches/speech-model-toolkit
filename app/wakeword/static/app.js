@@ -111,8 +111,7 @@ async function startPrepare() {
 
   let jobId;
   try {
-    const res  = await fetch("api/prepare", { method: "POST" });
-    const data = await res.json();
+    const data = await SMT.request("api/prepare", { method: "POST" });
 
     if (data.status === "already_ready") {
       onPrepareComplete();
@@ -226,8 +225,7 @@ previewBtn.addEventListener("click", async () => {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      alert("Preview failed: " + (err.detail || res.statusText));
+      SMT.showError("Preview failed: " + await SMT.errorMessage(res));
       return;
     }
 
@@ -238,7 +236,7 @@ previewBtn.addEventListener("click", async () => {
     previewAudio.play();
     previewAudio.onended = () => URL.revokeObjectURL(url);
   } catch (e) {
-    alert("Preview error: " + e.message);
+    SMT.showError("Preview failed: can't reach the server (" + e.message + ").");
   } finally {
     previewBtn.classList.remove("loading");
     previewBtn.textContent = "🔊 Preview";
@@ -271,10 +269,7 @@ async function startTraining(phrase) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ phrase }),
     });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `HTTP ${res.status}`);
-    }
+    if (!res.ok) throw new Error(await SMT.errorMessage(res));
     const data = await res.json();
     jobId = data.job_id;
     progressLabel.textContent = `Training "${data.model_name}"…`;
@@ -502,7 +497,7 @@ async function startListening() {
     micActiveLabel.textContent = `🎙 ${label}`;
     micActiveLabel.style.display = "block";
   } catch (e) {
-    alert("Microphone access denied: " + e.message);
+    SMT.showError(SMT.micError(e));
     stopListening();
     return;
   }

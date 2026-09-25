@@ -7,21 +7,25 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+import logging
+
+from .. import errors
 from ..lab import stt
 from . import providers, store
 
 _DIR = Path(__file__).parent
+_LOGGER = logging.getLogger(__name__)
 
 app = FastAPI(title="Settings", docs_url=None, redoc_url=None)
 
 
+errors.install(app, "settings")
+
+
 @app.exception_handler(providers.ProviderError)
-async def provider_error(_request: Request, err: providers.ProviderError) -> Response:
-    return Response(str(err), status_code=400)
-
-
-@app.exception_handler(ValueError)
-async def bad_request(_request: Request, err: ValueError) -> Response:
+async def provider_error(request: Request, err: providers.ProviderError) -> Response:
+    # The provider's own message, e.g. "API key rejected (HTTP 401): ..."
+    _LOGGER.warning("%s %s: %s", request.method, request.url.path, err)
     return Response(str(err), status_code=400)
 
 
@@ -32,7 +36,11 @@ async def api_settings() -> Dict[str, Any]:
 
 @app.put("/api/settings")
 async def api_update(values: Dict[str, Any]) -> Dict[str, Any]:
-    return store.update(values)
+    result = store.update(values)
+    # What changed, never the values of keys
+    changed = [k if k != "connections" else f"connections ({len(values[k])})" for k in values]
+    _LOGGER.info("Settings updated: %s", ", ".join(changed))
+    return result
 
 
 @app.get("/api/providers")
@@ -67,7 +75,9 @@ async def api_stt_download(body: Dict[str, Any]) -> Dict[str, Any]:
     try:
         await stt.ensure(model)
     except Exception as err:  # download or load failure
-        raise HTTPException(500, f"Could not load {model}: {err}") from err
+        _LOGGER.exception("Downloading Whisper %s failed", model)
+        raise HTTPException(500, f"Could not download or load Whisper {model}: {err}. "
+                                 "Check the server's internet connection and free disk space.") from err
     return stt.status(model)
 
 

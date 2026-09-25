@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional
 
+from ..errors import explain_failure
 from .voices import AUDIO_EXTENSIONS, Voice
 
 _LOGGER = logging.getLogger(__name__)
@@ -460,6 +461,11 @@ class TrainingManager:
         workspace.finished = None
         workspace.epoch = None
         workspace.error = ""
+        _LOGGER.info(
+            "Training %s: preset=%s hours=%g epochs=%s start=%s device=%s batch=%s",
+            workspace.voice.name, settings.preset, settings.hours, settings.epochs or "no limit",
+            settings.checkpoint[-60:] or "scratch", settings.accelerator, settings.batch_size or "auto",
+        )
         asyncio.create_task(self._train(workspace))
 
     async def stop(self, workspace: Workspace) -> None:
@@ -653,6 +659,11 @@ class TrainingManager:
         finally:
             ws.proc = None
             ws.finished = time.time()
+            _LOGGER.info(
+                "Training %s %s after %.0f min (epoch %s)%s",
+                ws.voice.name, ws.state, (ws.finished - (ws.started or ws.finished)) / 60,
+                ws.epoch, f": {ws.error}" if ws.error else "",
+            )
 
         # Leave a usable voice behind whenever training ran
         if (
@@ -674,8 +685,9 @@ class TrainingManager:
         ws.stage = "export"
         try:
             await self._export(ws)
+            _LOGGER.info("Exported %s", ws.voice.name)
         except Exception as err:
-            _LOGGER.exception("Export failed")
+            _LOGGER.exception("Export of %s failed", ws.voice.name)
             ws.error = f"Export failed: {err}"
             self._log(ws, f"ERROR: export failed: {err}")
         finally:
@@ -801,7 +813,8 @@ class TrainingManager:
 
         return_code = await proc.wait()
         if return_code != 0:
-            raise RuntimeError(f"Command failed with exit code {return_code}")
+            step = "Training" if track else Path(command[2] if len(command) > 2 and command[1] == "-m" else command[0]).name
+            raise RuntimeError(explain_failure(step, return_code, list(ws.log)[-20:]))
 
     async def _auto_checkpoint(self, ws: Workspace) -> str:
         """URL of the pretrained voice closest to this voice's recordings.

@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import zipfile
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -17,7 +18,8 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import matching
+from .. import errors
+from . import freeform, matching
 from .training import (
     ACCELERATORS,
     AUTO_CHECKPOINT,
@@ -63,19 +65,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Piper Voice Helper", lifespan=lifespan)
 
 
-@app.exception_handler(KeyError)
-async def not_found(_request: Request, err: KeyError) -> Response:
-    return Response(str(err.args[0]), status_code=404)
-
-
-@app.exception_handler(ValueError)
-async def bad_request(_request: Request, err: ValueError) -> Response:
-    return Response(str(err), status_code=400)
-
-
-@app.exception_handler(RuntimeError)
-async def conflict(_request: Request, err: RuntimeError) -> Response:
-    return Response(str(err), status_code=409)
+errors.install(app, "voice")
 
 
 # -----------------------------------------------------------------------------
@@ -230,6 +220,73 @@ async def api_upload(name: str, dataset: UploadFile = File(...)) -> Dict[str, An
     return {"imported": imported, "recorded": voice.num_recorded()}
 
 
+# ---- Freeform recording -------------------------------------------------------
+
+
+@app.get("/api/voices/{name}/freeform")
+async def api_freeform_list(name: str) -> Dict[str, Any]:
+    return {"takes": freeform.list_takes(store.get(name))}
+
+
+@app.post("/api/voices/{name}/freeform")
+async def api_freeform_start(
+    name: str,
+    audio: UploadFile = File(...),
+    denoise: str = Form("light"),
+    diarize: bool = Form(False),
+    mic: str = Form(""),
+) -> Dict[str, Any]:
+    """A long take (recorded, or an uploaded audio/video file): transcribe it,
+    split it into clips and, with diarize, find who speaks in each clip."""
+    voice = store.get(name)
+    extension = {"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a"}.get(
+        (audio.content_type or "").split(";")[0], ""
+    )
+    source = freeform.new_take(voice, audio.filename or f"take{extension}")
+    with open(source, "wb") as out:
+        await asyncio.to_thread(shutil.copyfileobj, audio.file, out, 4 * 2**20)
+    take = freeform.start(voice, source, denoise, diarize)
+    voice.remember_microphone(mic)
+    return take
+
+
+@app.get("/api/voices/{name}/freeform/{take_id}")
+async def api_freeform_take(name: str, take_id: str) -> Dict[str, Any]:
+    return freeform.get_take(store.get(name), take_id)
+
+
+class DenoiseRequest(BaseModel):
+    denoise: str
+
+
+@app.put("/api/voices/{name}/freeform/{take_id}")
+async def api_freeform_update(name: str, take_id: str, request: DenoiseRequest) -> Dict[str, Any]:
+    return freeform.set_denoise(store.get(name), take_id, request.denoise)
+
+
+@app.get("/api/voices/{name}/freeform/{take_id}/clips/{index}.wav")
+async def api_freeform_clip(name: str, take_id: str, index: int, denoise: str = "") -> Response:
+    wav = await asyncio.to_thread(freeform.clip_wav, store.get(name), take_id, index, denoise or None)
+    return Response(wav, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+
+class SaveTakeRequest(BaseModel):
+    clips: list
+
+
+@app.post("/api/voices/{name}/freeform/{take_id}/save")
+async def api_freeform_save(name: str, take_id: str, request: SaveTakeRequest) -> Dict[str, Any]:
+    voice = store.get(name)
+    saved = await asyncio.to_thread(freeform.save, voice, take_id, request.clips)
+    return {"saved": saved, "recorded": voice.num_recorded()}
+
+
+@app.delete("/api/voices/{name}/freeform/{take_id}")
+async def api_freeform_discard(name: str, take_id: str) -> Dict[str, Any]:
+    freeform.discard(store.get(name), take_id)
+    return {"ok": True}
+
+
 # ---- Starting voice auto-detect ----------------------------------------------
 
 _match_jobs: Dict[str, Dict[str, Any]] = {}
@@ -270,8 +327,9 @@ async def api_find_match(name: str) -> Dict[str, Any]:
         try:
             await matching.find(voice, DATA_DIR / "speaker-match", log)
             job["state"] = "done"
-        except Exception as err:  # reported to the page
-            _LOGGER.exception("Voice matching failed")
+        except Exception as err:  # reported to the page (matching.find logs the details)
+            if not isinstance(err, RuntimeError):
+                _LOGGER.exception("Auto-detect for %s failed", voice.name)
             job.update(state="error", error=str(err))
 
     job["task"] = asyncio.create_task(run())

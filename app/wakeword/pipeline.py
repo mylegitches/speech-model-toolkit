@@ -8,12 +8,14 @@ so FastAPI can stream stdout/stderr line-by-line via an asyncio queue.
 """
 
 import asyncio
+import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 import zipfile
 from dataclasses import dataclass, field
@@ -22,6 +24,10 @@ from pathlib import Path
 from typing import AsyncIterator, Optional
 
 import yaml
+
+from ..errors import explain_failure
+
+_LOGGER = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Configuration from environment (set by Docker / docker-compose)
@@ -186,12 +192,10 @@ def link_piper_models() -> None:
     default path (Path(__file__).parent / "models") resolves correctly.
     Runs at startup and again after the prepare job downloads the weights.
     """
-    import logging
-
     src_dir = DATA_DIR / "piper-sample-generator" / "models"
     dst_dir = PIPER_GEN_DIR / "models"
     if not src_dir.exists():
-        logging.warning("[startup] Piper model source dir not found: %s", src_dir)
+        _LOGGER.info("Wake word training data not downloaded yet (Wake Word tab → Download Data)")
         return
     dst_dir.mkdir(parents=True, exist_ok=True)
     for pt_file in src_dir.glob("*.pt"):
@@ -200,9 +204,9 @@ def link_piper_models() -> None:
             continue
         try:
             dst.symlink_to(pt_file)
-            logging.info("[startup] Linked piper model: %s", pt_file.name)
+            _LOGGER.info("[startup] Linked piper model: %s", pt_file.name)
         except Exception as exc:
-            logging.warning("[startup] Could not symlink %s: %s", pt_file.name, exc)
+            _LOGGER.warning("[startup] Could not symlink %s: %s", pt_file.name, exc)
 
 
 def find_model(model_name: str) -> Optional[Path]:
@@ -322,7 +326,8 @@ async def _run_step(
 
     rc = await proc.wait()
     if rc != 0 and not allow_nonzero:
-        msg = f"[{stage.value}] process exited with code {rc}"
+        msg = explain_failure(f"The {stage.value} step", rc, job.log_lines[-20:])
+        _LOGGER.error("Wake word %s: %s", job.model_name, msg)
         job.log_lines.append(msg)
         await job._queue.put((stage.value, msg))
         raise RuntimeError(msg)
@@ -388,6 +393,8 @@ async def run_training(job: TrainJob) -> None:
     global _active_job_id
     _active_job_id = job.job_id
     _jobs[job.job_id] = job
+    started = time.monotonic()
+    _LOGGER.info("Wake word training started: %r -> %s", job.phrase, job.model_name)
 
     try:
         # Ensure OOM-safe validation set exists
@@ -426,11 +433,15 @@ async def run_training(job: TrainJob) -> None:
         _make_zip(job)
 
         job.stage = Stage.DONE
+        _LOGGER.info("Wake word %s trained in %.1f min", job.model_name, (time.monotonic() - started) / 60)
         await job._queue.put(("done", f"Training complete: {job.model_name}"))
 
     except Exception as exc:
         job.stage = Stage.ERROR
         job.error = str(exc)
+        _LOGGER.error("Wake word %s failed after %.1f min: %s", job.model_name,
+                      (time.monotonic() - started) / 60, exc,
+                      exc_info=not isinstance(exc, RuntimeError))
         await job._queue.put(("error", f"ERROR: {exc}"))
 
     finally:
@@ -527,6 +538,7 @@ async def run_prepare(job: PrepareJob) -> None:
     job.stage = PrepareStage.RUNNING
 
     await job._queue.put(("running", "Starting data download…"))
+    _LOGGER.info("Wake word training data download started -> %s", DATA_DIR)
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -545,16 +557,18 @@ async def run_prepare(job: PrepareJob) -> None:
         rc = await proc.wait()
         if rc != 0:
             # Last few log lines contain the traceback — surface them in the error message
-            tail = "\n".join(job.log_lines[-10:])
-            raise RuntimeError(f"prepare_data.py exited with code {rc}:\n{tail}")
+            raise RuntimeError(explain_failure("The data download", rc, job.log_lines[-20:])
+                               + " Click Download Data again to resume.")
 
         link_piper_models()
+        _LOGGER.info("Wake word training data ready")
         job.stage = PrepareStage.DONE
         await job._queue.put(("done", "All assets downloaded and ready."))
 
     except Exception as exc:
         job.stage = PrepareStage.ERROR
         job.error = str(exc)
+        _LOGGER.error("Wake word data download failed: %s", exc, exc_info=not isinstance(exc, RuntimeError))
         await job._queue.put(("error", f"ERROR: {exc}"))
 
     finally:

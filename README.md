@@ -63,7 +63,13 @@ Training settings (1000 samples, 10k steps, ...) are in `app/wakeword/config_tem
 ## Voice tab
 
 1. **Voice**: create a voice with a name, language and whether it should sound female or male (this picks a similar pretrained voice to start from).
-2. **Record**: read the sentences shown. Keys: `R` record/stop, `P` play back, `S` save & next, `K` skip. 50 recordings is the minimum and 300+ sounds much better. Already have recordings? Upload a zip (`metadata.csv` with `file|text` lines plus audio, or audio files with matching `.txt` transcripts).
+2. **Record**, in one of two ways (they can be mixed):
+   - **Read sentences**: read the prompts shown. Keys: `R` record/stop, `P` play back, `S` save & next, `K` skip.
+   - **Speak freely**: talk naturally (a story, your day, a book read aloud; up to 30 minutes per take), or upload an audio or video file you already have (a voice memo, podcast, interview, movie; up to 8 GB). The take is transcribed locally with Whisper (the model chosen in Settings) and cut into sentence-sized clips at sentence ends, pauses and speaker turns. Review them before saving: ▶ to listen, fix any wrong words (the text must match exactly what was said), untick clips with mistakes, music or other voices.
+     - **Background noise**: *Keep*, *Reduce* (steady hiss and hum; the default) or *Remove* (RNNoise, a speech denoiser that also removes music, traffic and crowds). It can be changed per take while reviewing; the original audio is kept.
+     - **Several people talking** (ticked automatically for video files): every clip is also assigned to a speaker, using the same speaker-recognition model as Auto-detect. The review then starts with **Who do you want?**: one card per speaker with how much they talk, three ▶ samples and a quote. Pick one (or several, if one person was split into two groups) and only their clips are listed. If the voice already has 5+ recordings, the speaker who sounds most like them is marked and preselected. Only use recordings of people who agreed to have their voice cloned.
+
+   50 recordings is the minimum and 300+ sounds much better. Already have a prepared dataset? Upload a zip (`metadata.csv` with `file|text` lines plus audio, or audio files with matching `.txt` transcripts).
 3. **Train**: pick a preset:
 
    | Preset | Time | |
@@ -111,6 +117,22 @@ The microphone is ignored while a reply plays, so the reply can't trigger the wa
 
 ---
 
+## When something goes wrong
+
+Every error is shown in plain words where it happened, with what to do about it (for example "the GPU ran out of memory: lower the batch size", "this file has no audio track", "the file is too large for your reverse proxy"). Unexpected errors say so and point to the server log.
+
+The server log has one line per event (time, level, component): training and exports starting, finishing or failing (with timings), downloads, freeform takes, speaker detection, auto-detect results, Test Lab sessions and AI calls (provider, model, time; never keys or what was said):
+
+```bash
+docker compose logs -f toolkit
+```
+
+Set `LOG_LEVEL=DEBUG` under `environment:` in `docker-compose.yml` for every HTTP request too, or `WARNING` for problems only. Training runs also keep their full output in `data/voice/voices/<name>/training/train.log`.
+
+Large uploads (movies) need a generous upload limit on your reverse proxy, e.g. nginx `client_max_body_size 8g;`. Uploads are stored under `data/tmp` while they arrive, so they don't fill the container's own disk.
+
+---
+
 ## Where things are stored
 
 Everything is in `./data`, bind-mounted to `/data`:
@@ -121,9 +143,9 @@ data/
   wakeword/          wake word training assets + openWakeWord base models
   wakeword-models/   your wake words: <name>/<name>.onnx, .tflite, .zip, .yaml
   voice/
-    voices/          one folder per voice: recordings, training runs, exports
+    voices/          one folder per voice: recordings, freeform takes awaiting review, training runs, exports
     checkpoints/     downloaded pretrained base voices
-    speaker-match/   speaker recognition model + sample clips for Auto-detect
+    speaker-match/   speaker recognition model + sample clips (Auto-detect, speaker detection)
     default-voices/  the Test Lab's default Piper voice
   stt-models/        Whisper models for the Test Lab
 ```

@@ -8,6 +8,8 @@ services:
       - "8765:8765"
     volumes:
       - ./data:/data
+    environment:
+      - LOG_LEVEL=INFO  # DEBUG for every request, WARNING for problems only
     extra_hosts:
       # Lets the AI settings reach Ollama / LM Studio running on this machine
       - "host.docker.internal:host-gateway"

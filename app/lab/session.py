@@ -142,9 +142,12 @@ class LabSession:
                     await self.on_control(json.loads(message["text"]))
         except WebSocketDisconnect:
             pass
+        except ValueError as err:  # e.g. unknown wake word
+            _LOGGER.warning("Test Lab session rejected: %s", err)
+            await self.send(type="error", message=str(err))
         except Exception as err:  # report, then close
             _LOGGER.exception("Test Lab session failed")
-            await self.send(type="error", message=str(err))
+            await self.send(type="error", message=f"The session stopped unexpectedly: {err}. Details are in the server log.")
         finally:
             if self.task and not self.task.done():
                 self.task.cancel()
@@ -154,7 +157,10 @@ class LabSession:
         self.voice = str(start.get("voice") or tts.DEFAULT_VOICE)
         onnx_path = ww.find_model(self.wakeword)
         if onnx_path is None:
-            raise ValueError(f"Wake word model '{self.wakeword}' not found")
+            raise ValueError(f"Wake word model '{self.wakeword}' not found. Was it deleted? Reload the page.")
+        conn = settings_store.active_connection(self.settings)
+        _LOGGER.info("Test Lab session: wake word %s, voice %s, replies: %s", self.wakeword, self.voice,
+                     f"AI {conn['provider']}/{conn['model']}" if conn else "fixed")
 
         await self.set_state("loading", "Loading wake word model…")
         self.detector = await asyncio.to_thread(ww.load_detector, onnx_path)
@@ -209,6 +215,7 @@ class LabSession:
                 await self.on_wake()
 
     async def on_wake(self) -> None:
+        _LOGGER.info("Test Lab: wake word %s detected", self.wakeword)
         await self.set_state("heard", "Wake word detected")
         if settings_store.active_connection(self.settings) is None:
             self.spawn(self.speak(self.settings["assistant"]["fixedReply"]))
@@ -283,7 +290,8 @@ class LabSession:
         try:
             reply = await ask_ai(self.history, question)
         except providers.ProviderError as err:
-            await self.send(type="error", message=str(err))
+            _LOGGER.warning("Test Lab: AI request failed: %s", err)
+            await self.send(type="error", message=f"The AI didn't answer: {err}")
             await self.speak(AI_FAILED)
             return
 

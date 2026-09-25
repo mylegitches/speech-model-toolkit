@@ -244,6 +244,15 @@ details summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
 .score-bar.hot { background: var(--success); }
 .score-val { font-size: 0.75rem; color: var(--muted); font-family: var(--mono); min-height: 1em; }
 
+/* Error toast (audio-prefs.js: SMT.showError) */
+.smt-toast {
+  position: fixed; left: 50%; bottom: calc(1rem + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  z-index: 100; max-width: min(92vw, 34rem);
+  background: #3b1416; border: 1px solid var(--danger); color: #fecaca;
+  border-radius: var(--radius); padding: 0.7rem 1rem; font-size: 0.9rem;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5); cursor: pointer;
+}
+
 /* ---- Status pill -------------------------------------------------------- */
 .pill { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.15rem 0.65rem; border-radius: 99px; background: var(--surface-2); color: var(--muted); font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
 .pill--ok     { background: var(--accent-soft); color: var(--accent-text); }

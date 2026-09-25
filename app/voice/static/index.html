@@ -74,6 +74,12 @@
       <div class="vu"><div id="vu-bar" class="vu-bar"></div></div>
       <div id="mic-warning" class="banner banner--warning hidden"></div>
 
+      <div class="mode-switch" role="tablist">
+        <button type="button" class="mode-btn active" data-mode="prompts" role="tab">Read sentences</button>
+        <button type="button" class="mode-btn" data-mode="free" role="tab">Speak freely</button>
+      </div>
+
+      <div id="prompt-mode" class="mode-panel">
       <div id="prompt-box" class="prompt-box">
         <p id="prompt-text" class="prompt-text">Loading…</p>
       </div>
@@ -86,6 +92,35 @@
       </div>
       <p id="record-status" class="hint">First pick your microphone and click “Enable microphone”. Use the same one every session.</p>
       <audio id="playback" class="hidden"></audio>
+      </div>
+
+      <div id="free-mode" class="mode-panel hidden">
+        <p class="hint">Talk naturally: tell a story, describe your day, read a book aloud. When you stop, the take is transcribed and cut into sentence-sized clips for you to check. Speak clearly and pause briefly between sentences; up to 30 minutes per take.</p>
+        <div class="row">
+          <button id="free-record-btn" class="btn btn--record">● Start recording</button>
+          <span id="free-timer" class="pill hidden">0:00</span>
+          <label class="inline-select">Background noise
+            <select id="free-denoise">
+              <option value="off">Keep as is</option>
+              <option value="light" selected>Reduce (hiss, hum)</option>
+              <option value="strong">Remove (music, traffic, crowds)</option>
+            </select>
+          </label>
+        </div>
+
+        <details class="upload" id="free-upload">
+          <summary>Or use an audio or video file you already have</summary>
+          <p class="hint">A voice memo, podcast, interview or movie. Only use recordings of people who agreed to have their voice cloned.</p>
+          <div class="row">
+            <input type="file" id="free-file" accept="audio/*,video/*,.m4a,.mp3,.wav,.flac,.ogg,.webm,.mkv,.mp4,.mov" class="grow" />
+            <button id="free-upload-btn" class="btn btn--secondary">Transcribe file</button>
+          </div>
+          <label class="switch"><input type="checkbox" id="free-diarize" /><span>Several people are talking: find each speaker so you can pick one</span></label>
+          <p id="free-upload-status" class="hint"></p>
+        </details>
+        <div id="free-takes" class="free-takes"></div>
+        <audio id="clip-audio" class="hidden"></audio>
+      </div>
 
       <details class="upload">
         <summary>Already have recordings? Upload a .zip</summary>

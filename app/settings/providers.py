@@ -8,6 +8,7 @@ Plain HTTP (httpx), no vendor SDKs. Four API styles cover every provider:
   ollama     Ollama, local or Ollama Cloud
 """
 
+import logging
 import time
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional
@@ -15,6 +16,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 TIMEOUT = httpx.Timeout(60.0, connect=10.0)
+_LOGGER = logging.getLogger(__name__)
 ANTHROPIC_VERSION = "2023-06-01"
 
 
@@ -202,6 +204,7 @@ async def list_models(
         if owned:
             await client.aclose()
 
+    _LOGGER.info("AI %s: listed %d models from %s", provider.id, len(models), base)
     return sorted({m for m in models if m}, key=str.lower)
 
 
@@ -226,14 +229,19 @@ async def chat(
     headers = _headers(conn, provider)
     owned = client is None
     client = _client(client)
+    started = time.monotonic()
     try:
         try:
-            return await _chat(client, provider, base, headers, model, messages, system, temperature, max_tokens)
+            reply = await _chat(client, provider, base, headers, model, messages, system, temperature, max_tokens)
+            _LOGGER.info("AI %s/%s answered in %.1fs (%d chars)", provider.id, model, time.monotonic() - started, len(reply))
+            return reply
         except ProviderError as err:
             # Some models (reasoning models in particular) only allow their
             # default temperature: retry once without setting it.
             if "temperature" in str(err).lower() and temperature is not None:
+                _LOGGER.info("AI %s/%s rejected the temperature; retrying without it", provider.id, model)
                 return await _chat(client, provider, base, headers, model, messages, system, None, max_tokens)
+            _LOGGER.warning("AI %s/%s failed after %.1fs: %s", provider.id, model, time.monotonic() - started, err)
             raise
     finally:
         if owned:

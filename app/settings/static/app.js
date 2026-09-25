@@ -18,13 +18,7 @@ const LANGUAGES = [
 // ---- API ------------------------------------------------------------------------
 
 async function api(path, options = {}) {
-  const res = await fetch(path, options);
-  if (!res.ok) {
-    let message = await res.text();
-    try { message = JSON.parse(message).detail || message; } catch (e) { /* plain text */ }
-    throw new Error(message || res.statusText);
-  }
-  return res.json();
+  return SMT.request(path, options);  // throws Error(readable message)
 }
 
 const send = (path, method, body) => api(path, {
@@ -324,7 +318,7 @@ $('#stt-download-btn').addEventListener('click', async (e) => {
     await send('api/stt/download', 'POST', { model: settings.speech.sttModel });
     toast('Speech model ready');
   } catch (err) {
-    alert(err.message);
+    SMT.showError(err.message);
   }
   refreshStt();
 });
@@ -378,7 +372,7 @@ async function startMicTest() {
       autoGainControl: settings.audio.autoGainControl,
     }, $('#mic-select').value);
   } catch (err) {
-    alert(`Microphone error: ${err.message}`);
+    SMT.showError(SMT.micError(err));
     return;
   }
   await listDevices();  // names are visible once the microphone is allowed

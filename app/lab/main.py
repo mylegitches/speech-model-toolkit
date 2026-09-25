@@ -1,5 +1,6 @@
 """Test Lab: say your wake word, hear your voice answer. Mounted at /lab."""
 
+import logging
 from pathlib import Path
 from typing import Any, Dict
 
@@ -8,19 +9,19 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .. import errors
 from ..settings import providers
 from ..settings import store as settings_store
 from ..wakeword import pipeline as ww
 from . import session, stt, tts
 
 _DIR = Path(__file__).parent
+_LOGGER = logging.getLogger(__name__)
 
 app = FastAPI(title="Test Lab", docs_url=None, redoc_url=None)
 
 
-@app.exception_handler(KeyError)
-async def not_found(_request: Request, err: KeyError) -> Response:
-    return Response(str(err.args[0]), status_code=404)
+errors.install(app, "lab")
 
 
 def assistant_info(settings: Dict[str, Any]) -> Dict[str, Any]:
@@ -77,13 +78,15 @@ async def api_ask(request: AskRequest) -> Dict[str, Any]:
     try:
         reply = await session.ask_ai(history, text)
     except providers.ProviderError as err:
-        error = str(err)
+        _LOGGER.warning("Test Lab typed question: AI request failed: %s", err)
+        error = f"The AI didn't answer: {err}"
         reply = session.AI_FAILED
 
     try:
         wav = await tts.synthesize(request.voice, reply)
         audio_url = f"api/audio/{session.store_audio(wav)}.wav"
     except Exception as err:
+        _LOGGER.exception("Test Lab: speaking the reply with %s failed", request.voice)
         audio_url = None
         error = error or f"Could not speak the reply: {err}"
 

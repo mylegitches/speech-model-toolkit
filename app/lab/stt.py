@@ -7,7 +7,9 @@ two on a CPU anyway.
 """
 
 import asyncio
+import logging
 import os
+import time
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -28,6 +30,7 @@ MODELS = [
     {"id": "medium", "label": "Medium (multilingual) · 1.5 GB"},
 ]
 
+_LOGGER = logging.getLogger(__name__)
 _models: Dict[str, Any] = {}
 _lock = threading.Lock()
 _downloading: Optional[str] = None
@@ -63,6 +66,8 @@ def _load(model_id: str):
 
             MODELS_DIR.mkdir(parents=True, exist_ok=True)
             _downloading = model_id
+            started = time.monotonic()
+            _LOGGER.info("Loading Whisper %s%s", model_id, "" if is_cached(model_id) else " (downloading first)")
             try:
                 _models[model_id] = WhisperModel(
                     model_id,
@@ -72,6 +77,7 @@ def _load(model_id: str):
                 )
             finally:
                 _downloading = None
+            _LOGGER.info("Whisper %s ready in %.0fs", model_id, time.monotonic() - started)
         return _models[model_id]
 
 

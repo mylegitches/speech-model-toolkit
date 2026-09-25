@@ -68,6 +68,11 @@ print('Patched train.py num_workers=0')"
 # TFLite export (separate because it pulls keras/tf, which can conflict with torch)
 RUN pip install --no-cache-dir onnx2tf
 
+# RNNoise model for "strong" noise reduction of freeform clips (ffmpeg arnndn)
+RUN mkdir -p /opt/models \
+    && curl -fsSL -o /opt/models/sh.rnnn \
+        https://raw.githubusercontent.com/GregorR/rnnoise-models/master/somnolent-hogwash-2018-09-01/sh.rnnn
+
 # ── App ─────────────────────────────────────────────────────────────────────
 COPY export_dataset/ /app/export_dataset/
 COPY prompts/ /app/prompts/
@@ -83,7 +88,9 @@ ENV PYTHONUNBUFFERED=1 \
     PIPER_GENERATOR_DIR=/app/piper-sample-generator \
     PIPER_PYTHON=/opt/piper-venv/bin/python3 \
     SETTINGS_FILE=/data/settings.json \
-    STT_MODELS_DIR=/data/stt-models
+    STT_MODELS_DIR=/data/stt-models \
+    RNNOISE_MODEL=/opt/models/sh.rnnn \
+    TMPDIR=/data/tmp
 
 VOLUME ["/data"]
 EXPOSE 8765

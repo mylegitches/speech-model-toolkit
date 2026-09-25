@@ -14,6 +14,7 @@ Endpoints:
 """
 
 import asyncio
+import logging
 import os
 import shutil
 import tempfile
@@ -27,10 +28,15 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .. import errors
+from ..errors import explain_failure
 from ..settings import store as settings_store
 from . import pipeline as pl
 
+_LOGGER = logging.getLogger(__name__)
+
 app = FastAPI(title="easy-wakeword-trainer", docs_url=None, redoc_url=None)
+errors.install(app, "wakeword")
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -53,8 +59,6 @@ async def startup() -> None:
        piper-sample-generator scripts dir so generate_samples.py's hardcoded
        default path (Path(__file__).parent / "models") resolves correctly.
     """
-    import asyncio
-    import logging
     import urllib.request
 
     loop = asyncio.get_event_loop()
@@ -76,19 +80,19 @@ async def startup() -> None:
             resources_dir.parent.mkdir(parents=True, exist_ok=True)
             resources_dir.symlink_to(oww_models_dir, target_is_directory=True)
         except OSError as exc:
-            logging.warning("[startup] Could not link %s: %s", resources_dir, exc)
+            _LOGGER.warning("[startup] Could not link %s: %s", resources_dir, exc)
 
     for fname in ("melspectrogram.onnx", "embedding_model.onnx"):
         dest = oww_models_dir / fname
         if dest.exists():
             continue
         url = OWW_MODELS_BASE + fname
-        logging.info("[startup] Downloading %s …", fname)
+        _LOGGER.info("[startup] Downloading %s …", fname)
         try:
             await loop.run_in_executor(None, urllib.request.urlretrieve, url, dest)
-            logging.info("[startup] Saved %s (%d KB)", fname, dest.stat().st_size // 1024)
+            _LOGGER.info("[startup] Saved %s (%d KB)", fname, dest.stat().st_size // 1024)
         except Exception as exc:
-            logging.error("[startup] Failed to download %s: %s", fname, exc)
+            _LOGGER.error("[startup] Failed to download %s: %s", fname, exc)
 
     # ── 2. Piper .pt weight symlinks ────────────────────────────────────────
     pl.link_piper_models()
@@ -197,8 +201,8 @@ async def start_train(req: TrainRequest, background_tasks: BackgroundTasks):
         missing = [k for k, v in pl.check_data().items() if not v]
         raise HTTPException(
             status_code=428,
-            detail=f"Required data assets are missing: {missing}. "
-                   "Run scripts/prepare_data.py first.",
+            detail="The training data isn't downloaded yet (missing: " + ", ".join(missing) + "). "
+                   "Click Download Data at the top of this tab.",
         )
 
     model_name = pl.phrase_to_model_name(phrase)
@@ -362,13 +366,22 @@ async def preview_phrase(req: PreviewRequest):
             cwd=str(pl.OWW_DIR),
             env=env,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=90)
+        except asyncio.TimeoutError:
+            proc.kill()
+            _LOGGER.error("Wake word preview %r timed out", phrase)
+            raise HTTPException(
+                status_code=504,
+                detail="Generating the preview took over 90 s. The first one after a restart loads "
+                       "the voice model, so try once more; if it keeps happening, check the server log.",
+            )
 
         if proc.returncode != 0:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Piper generation failed:\n{stdout.decode(errors='replace')}",
-            )
+            message = explain_failure("Generating the preview", proc.returncode,
+                                      stdout.decode(errors="replace").splitlines()[-20:])
+            _LOGGER.error("Wake word preview %r: %s", phrase, message)
+            raise HTTPException(status_code=500, detail=message)
 
         wavs = list(tmp_dir.glob("*.wav"))
         if not wavs:
@@ -438,8 +451,7 @@ async def test_wakeword(websocket: WebSocket, model_name: str):
     except WebSocketDisconnect:
         pass
     except Exception as exc:
-        import logging
-        logging.error("Test WebSocket error: %s", exc)
+        _LOGGER.exception("Wake word tester (%s) failed", model_name)
         try:
             await websocket.close(code=1011, reason=str(exc))
         except Exception:

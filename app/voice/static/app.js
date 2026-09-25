@@ -15,12 +15,7 @@ let logCount = 0;
 let selectedPreset = null;
 
 async function api(path, options = {}) {
-  const response = await fetch(path, options);
-  if (!response.ok) {
-    throw new Error(await response.text() || response.statusText);
-  }
-  const type = response.headers.get('content-type') || '';
-  return type.includes('json') ? response.json() : response.blob();
+  return SMT.request(path, options);  // throws Error(readable message)
 }
 
 function postJson(path, body) {
@@ -94,6 +89,9 @@ async function selectVoice(name) {
   matchState = null;
   fillTrainForm(voice.defaults);
   loadMatch();
+  $('#free-takes').innerHTML = '';
+  Object.keys(renderedTakes).forEach((id) => delete renderedTakes[id]);
+  loadTakes();
   logCount = 0;
   $('#log-panel').textContent = '';
   renderStatus(voice.training);
@@ -118,7 +116,7 @@ $('#new-voice-form').addEventListener('submit', async (e) => {
     $('#new-name').value = '';
     await loadVoices(created.name);
   } catch (err) {
-    alert(err.message);
+    SMT.showError(err.message);
   }
 });
 
@@ -284,7 +282,7 @@ async function enableMicrophone() {
     await openMicrophone();
     $('#record-status').textContent = 'Microphone on. Say something and watch the green bar (red means too loud), then press R to record.';
   } catch (err) {
-    showMicProblem(`Microphone not available: ${err.message}`);
+    showMicProblem(SMT.micError(err));
   }
 }
 
@@ -401,6 +399,9 @@ document.addEventListener('keydown', (e) => {
   if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
     return;
   }
+  if (recordMode !== 'prompts') {
+    return;  // shortcuts are for reading prompts
+  }
   const key = e.key.toLowerCase();
   const actions = { r: '#record-btn', p: '#play-btn', s: '#save-btn', k: '#skip-btn' };
   if (actions[key] && !$(actions[key]).disabled) {
@@ -408,6 +409,359 @@ document.addEventListener('keydown', (e) => {
     $(actions[key]).click();
   }
 });
+
+// ---- Freeform: record freely (or upload), transcribe, review clips ------------------
+
+const FREE_MAX_SECONDS = 30 * 60;
+let recordMode = 'prompts';
+let freeRecorder = null;
+let freeChunks = [];
+let freeTimer = null;
+let freeStarted = 0;
+let takesTimer = null;
+const renderedTakes = {};  // take id -> state it was last rendered in
+const takeEdits = {};      // take id -> {clips: {index: {keep, text}}, speakers: Set}
+
+function setMode(mode) {
+  recordMode = mode;
+  document.querySelectorAll('.mode-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+  show($('#prompt-mode'), mode === 'prompts');
+  show($('#free-mode'), mode === 'free');
+  try { localStorage.setItem('voice.recordMode', mode); } catch (e) { /* ignore */ }
+}
+document.querySelectorAll('.mode-btn').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+try { setMode(localStorage.getItem('voice.recordMode') || 'prompts'); } catch (e) { setMode('prompts'); }
+
+function clock(seconds) {
+  const s = Math.floor(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : `${m}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function el(tag, props = {}, ...children) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+}
+
+$('#free-record-btn').addEventListener('click', async () => {
+  const button = $('#free-record-btn');
+  if (freeRecorder && freeRecorder.state === 'recording') {
+    button.disabled = true;
+    setTimeout(() => freeRecorder.stop(), 400);  // keep the last word
+    return;
+  }
+  try {
+    await openMicrophone();
+  } catch (err) {
+    SMT.showError(SMT.micError(err));
+    return;
+  }
+  freeChunks = [];
+  const mimeType = preferredMimeType();
+  freeRecorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
+  freeRecorder.ondataavailable = (e) => freeChunks.push(e.data);
+  freeRecorder.onstop = async () => {
+    clearInterval(freeTimer);
+    SMT.keepAwake(false);
+    const type = freeRecorder.mimeType || 'audio/webm';
+    const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+    button.classList.remove('recording');
+    button.textContent = '● Start recording';
+    button.disabled = false;
+    show($('#free-timer'), false);
+    await uploadTake(new Blob(freeChunks, { type }), `take.${ext}`, false);
+  };
+  freeRecorder.start(1000);
+  freeStarted = Date.now();
+  SMT.keepAwake(true);
+  button.classList.add('recording');
+  button.textContent = '■ Stop and transcribe';
+  show($('#free-timer'), true);
+  $('#free-timer').textContent = '0:00';
+  freeTimer = setInterval(() => {
+    const elapsed = (Date.now() - freeStarted) / 1000;
+    $('#free-timer').textContent = clock(elapsed);
+    if (elapsed >= FREE_MAX_SECONDS) button.click();
+  }, 500);
+});
+
+// Videos usually have several speakers (and a soundtrack)
+$('#free-file').addEventListener('change', () => {
+  const file = $('#free-file').files[0];
+  if (file && file.type.startsWith('video/')) {
+    $('#free-diarize').checked = true;
+    $('#free-denoise').value = 'strong';
+  }
+});
+
+$('#free-upload-btn').addEventListener('click', async () => {
+  const file = $('#free-file').files[0];
+  if (!file) return;
+  $('#free-upload-btn').disabled = true;
+  await uploadTake(file, file.name, $('#free-diarize').checked);
+  $('#free-upload-btn').disabled = false;
+  $('#free-file').value = '';
+});
+
+function uploadTake(blob, filename, diarize) {
+  const form = new FormData();
+  form.set('audio', blob, filename);
+  form.set('denoise', $('#free-denoise').value);
+  form.set('diarize', diarize ? 'true' : 'false');
+  form.set('mic', micLabel || '');
+  const status = $('#free-upload-status');
+  // XHR (not fetch) for upload progress: a movie can take a while to send
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', voiceUrl('/freeform'));
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 5e6) {
+        status.textContent = `Uploading… ${Math.round((e.loaded / e.total) * 100)}% of ${Math.round(e.total / 1e6)} MB`;
+      }
+    };
+    xhr.onload = async () => {
+      status.textContent = '';
+      if (xhr.status >= 400) {
+        const message = await SMT.errorMessage(new Response(xhr.responseText, { status: xhr.status, statusText: xhr.statusText }));
+        SMT.showError(`Could not transcribe: ${message}`);
+      }
+      loadTakes();
+      resolve();
+    };
+    xhr.onerror = () => {
+      status.textContent = '';
+      SMT.showError('Upload failed: the connection dropped. Check your network, and your reverse proxy’s upload size limit and timeouts.');
+      resolve();
+    };
+    xhr.send(form);
+  });
+}
+
+async function loadTakes() {
+  clearTimeout(takesTimer);
+  if (!voice) return;
+  const name = voice.name;
+  let takes = [];
+  try {
+    ({ takes } = await api(voiceUrl('/freeform')));
+  } catch (err) {
+    return;
+  }
+  if (!voice || voice.name !== name) return;
+
+  const box = $('#free-takes');
+  const ids = new Set(takes.map((t) => t.id));
+  box.querySelectorAll('.take').forEach((node) => {
+    if (!ids.has(node.dataset.id)) { node.remove(); delete renderedTakes[node.dataset.id]; }
+  });
+  takes.slice().reverse().forEach((take) => {
+    const existing = box.querySelector(`.take[data-id="${take.id}"]`);
+    if (existing && renderedTakes[take.id] === take.state && take.state !== 'running') return;
+    const node = renderTake(take);
+    if (existing) existing.replaceWith(node); else box.append(node);
+    renderedTakes[take.id] = take.state;
+  });
+  if (takes.length && recordMode !== 'free' && takes.some((t) => t.state === 'done')) {
+    setMode('free');  // there's something waiting for review
+  }
+  if (takes.some((t) => t.state === 'running')) takesTimer = setTimeout(loadTakes, 2000);
+}
+
+function takeTitle(take) {
+  const m = take.id.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/);
+  const parts = [`Take ${m ? `${m[2]}/${m[3]} ${m[4]}:${m[5]}` : take.id}`];
+  if (take.duration) parts.push(clock(take.duration));
+  if (take.speakers) parts.push(`${take.speakers.length} speaker${take.speakers.length === 1 ? '' : 's'}`);
+  return parts.join(' · ');
+}
+
+const speakerName = (id) => `Speaker ${String.fromCharCode(65 + (id % 26))}${id >= 26 ? Math.floor(id / 26) + 1 : ''}`;
+const SUGGEST_SIMILARITY = 0.45;
+
+function takeEditsFor(take) {
+  let edits = takeEdits[take.id];
+  if (!edits) {
+    edits = { clips: {}, speakers: new Set() };
+    // Preselect the speaker who sounds like this voice's existing recordings
+    const best = (take.speakers || []).filter((s) => s.similarity !== null)
+      .sort((a, b) => b.similarity - a.similarity)[0];
+    if (best && best.similarity >= SUGGEST_SIMILARITY) edits.speakers.add(best.id);
+    takeEdits[take.id] = edits;
+  }
+  return edits;
+}
+
+function renderTake(take) {
+  const box = el('div', { className: 'take' });
+  box.dataset.id = take.id;
+  const head = el('div', { className: 'take-head' }, el('strong', { textContent: takeTitle(take) }));
+  box.append(head);
+
+  const discard = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Discard' });
+  discard.addEventListener('click', async () => {
+    if (take.state === 'done' && !confirm('Discard this take and all its clips?')) return;
+    try {
+      await api(voiceUrl(`/freeform/${take.id}`), { method: 'DELETE' });
+    } catch (err) {
+      SMT.showError(err.message);
+    }
+    loadTakes();
+  });
+
+  if (take.state === 'running') {
+    head.append(el('span', { className: 'pill pill--warn pill--live', textContent: take.detail || 'Working…' }));
+    return box;
+  }
+  if (take.state === 'error') {
+    head.append(discard);
+    box.append(el('div', { className: 'banner banner--error', textContent: take.error || 'Transcription failed' }));
+    return box;
+  }
+
+  const edits = takeEditsFor(take);
+  const rerender = () => { const node = renderTake(take); box.replaceWith(node); };
+  const visible = (i) => !take.speakers || edits.speakers.has(take.segments[i].speaker);
+  const kept = () => take.segments.filter((_, i) => visible(i) && edits.clips[i]?.keep !== false).length;
+  const save = el('button', { type: 'button', className: 'btn btn--primary' });
+  const updateSave = () => { save.textContent = `✓ Save ${kept()} clips`; save.disabled = kept() === 0; };
+
+  const noise = el('select', {},
+    new Option('Noise: keep', 'off'), new Option('Noise: reduce', 'light'), new Option('Noise: remove', 'strong'));
+  noise.value = take.denoise;
+  noise.title = 'Background noise reduction for these clips (the original is kept)';
+  noise.addEventListener('change', async () => {
+    try {
+      await api(voiceUrl(`/freeform/${take.id}`), {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ denoise: noise.value }),
+      });
+      take.denoise = noise.value;
+    } catch (err) {
+      SMT.showError(err.message);
+      noise.value = take.denoise;
+    }
+  });
+  head.append(noise, save, discard);
+
+  if (!take.segments.length) {
+    box.append(el('p', { className: 'hint', textContent: 'No speech was found in this take.' }));
+    updateSave();
+    return box;
+  }
+
+  // Diarized take: pick whose clips to keep
+  if (take.speakers) {
+    if (!take.speakers.length) {
+      box.append(el('p', { className: 'hint', textContent: 'Nobody spoke long enough to train on.' }));
+      updateSave();
+      return box;
+    }
+    box.append(el('p', {
+      className: 'hint',
+      textContent: 'Who do you want? Play the samples and pick the speaker. If one person was split into two groups, pick both.',
+    }));
+    const grid = el('div', { className: 'speakers' });
+    const bestSimilarity = Math.max(...take.speakers.map((s) => s.similarity ?? -1));
+    for (const speaker of take.speakers) {
+      const chosen = edits.speakers.has(speaker.id);
+      const card = el('div', { className: `speaker${chosen ? ' selected' : ''}` });
+      const head2 = el('div', { className: 'speaker-head' }, el('strong', { textContent: speakerName(speaker.id) }));
+      if (speaker.similarity !== null) {
+        const like = speaker.similarity === bestSimilarity && speaker.similarity >= SUGGEST_SIMILARITY;
+        head2.append(el('span', {
+          className: `pill${like ? ' pill--ok' : ''}`,
+          textContent: like ? `Sounds like you · ${Math.round(speaker.similarity * 100)}%` : `${Math.round(speaker.similarity * 100)}% like you`,
+          title: "Similarity to this voice's existing recordings",
+        }));
+      }
+      card.append(head2, el('small', { className: 'hint', textContent: `${clock(speaker.seconds)} of speech · ${speaker.clips} clips` }));
+      const quote = take.segments[speaker.samples[0]]?.text;
+      if (quote) card.append(el('p', { className: 'quote', textContent: `“${quote}”` }));
+      const samples = el('div', { className: 'samples' });
+      speaker.samples.forEach((index, n) => {
+        const play = el('button', { type: 'button', className: 'btn btn--secondary', textContent: `▶ ${n + 1}` });
+        play.addEventListener('click', () => playClip(take, index, play));
+        samples.append(play);
+      });
+      const pick = el('button', {
+        type: 'button', className: `btn ${chosen ? 'btn--primary' : 'btn--secondary'}`,
+        textContent: chosen ? '✓ Using this voice' : 'Use this voice',
+      });
+      pick.addEventListener('click', () => {
+        if (chosen) edits.speakers.delete(speaker.id); else edits.speakers.add(speaker.id);
+        rerender();
+      });
+      samples.append(pick);
+      card.append(samples);
+      grid.append(card);
+    }
+    box.append(grid);
+    if (!edits.speakers.size) {
+      updateSave();
+      return box;
+    }
+  }
+
+  box.append(el('p', {
+    className: 'hint',
+    textContent: 'Check each clip: ▶ to listen, fix any wrong words (the text must match what was said exactly), untick clips with mistakes, music or other voices.',
+  }));
+  const list = el('div', { className: 'clips' });
+  take.segments.forEach((segment, i) => {
+    if (!visible(i)) return;
+    const edit = (edits.clips[i] ||= { keep: true, text: segment.text });
+    const row = el('div', { className: `clip${edit.keep ? '' : ' skipped'}` });
+    const keep = el('input', { type: 'checkbox', checked: edit.keep, title: 'Keep this clip' });
+    keep.addEventListener('change', () => {
+      edit.keep = keep.checked;
+      row.classList.toggle('skipped', !keep.checked);
+      updateSave();
+    });
+    const play = el('button', { type: 'button', className: 'btn btn--secondary', textContent: '▶' });
+    play.addEventListener('click', () => playClip(take, i, play));
+    const text = el('input', { type: 'text', value: edit.text });
+    text.addEventListener('input', () => { edit.text = text.value; });
+    const dur = el('span', { className: 'dur', textContent: `${(segment.end - segment.start).toFixed(1)}s` });
+    row.append(keep, play, text, dur);
+    list.append(row);
+  });
+  box.append(list);
+  updateSave();
+
+  save.addEventListener('click', async () => {
+    const clips = take.segments
+      .map((_, i) => ({ index: i, text: (edits.clips[i]?.text ?? '').trim(), keep: edits.clips[i]?.keep !== false }))
+      .filter((c, i) => visible(i) && c.keep && c.text);
+    save.disabled = true;
+    save.textContent = 'Saving…';
+    try {
+      const result = await postJson(voiceUrl(`/freeform/${take.id}/save`), { clips });
+      delete takeEdits[take.id];
+      updateRecorded(result.recorded);
+      box.replaceWith(el('div', { className: 'banner banner--success', textContent: `Saved ${result.saved} clips as recordings.` }));
+    } catch (err) {
+      SMT.showError(err.message);
+      updateSave();
+    }
+  });
+  return box;
+}
+
+let clipButton = null;
+async function playClip(take, index, button) {
+  const audio = $('#clip-audio');
+  const label = button.dataset.label || button.textContent;
+  button.dataset.label = label;
+  if (clipButton) clipButton.textContent = clipButton.dataset.label;
+  if (clipButton === button && !audio.paused) { audio.pause(); clipButton = null; return; }
+  clipButton = button;
+  button.textContent = '■';
+  audio.onended = () => { button.textContent = label; clipButton = null; };
+  audio.src = voiceUrl(`/freeform/${take.id}/clips/${index}.wav?denoise=${take.denoise}`);
+  await SMT.applyOutput(audio);
+  audio.play().catch(() => { button.textContent = label; });
+}
 
 $('#upload-btn').addEventListener('click', async () => {
   const file = $('#upload-input').files[0];
@@ -423,7 +777,7 @@ $('#upload-btn').addEventListener('click', async () => {
     updateRecorded(result.recorded);
     alert(`Imported ${result.imported} recordings.`);
   } catch (err) {
-    alert(`Upload failed: ${err.message}`);
+    SMT.showError(`Upload failed: ${err.message}`);
   } finally {
     $('#upload-btn').disabled = false;
     $('#upload-btn').textContent = 'Upload';
@@ -640,7 +994,7 @@ async function findMatch() {
   try {
     matchState = await postJson(voiceUrl('/match'), {});
   } catch (err) {
-    alert(err.message);
+    SMT.showError(err.message);
     return;
   }
   renderStartOptions();
@@ -831,7 +1185,7 @@ $('#speak-btn').addEventListener('click', async () => {
     show(audio, true);
     audio.play();
   } catch (err) {
-    alert(err.message);
+    SMT.showError(err.message);
   } finally {
     button.disabled = false;
     button.textContent = '🔊 Speak';
