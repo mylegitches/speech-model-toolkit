@@ -127,7 +127,9 @@ Every file is compared with the people found in your earlier files, so the same 
 **Let AI name them (optional).** With an AI connection and **Speaker identification** turned on in Settings, the AI reads a few lines each person said and works out who they are, for a whole series too:
 
 - It looks up the cast on TVmaze. Put the show in a folder named after it (`The Sopranos/Season 1/S01E01.mkv`), name the episodes after it (`The.Sopranos.S01E01.720p.mkv`), or include the IMDb ID in a file name (`… tt0141842.mkv`). Folders like *Season 1* or *Disc 2* are ignored.
-- With **web search** on and a provider that supports it (OpenRouter, Perplexity, Gemini, Anthropic, OpenAI search models), it can also look things up online.
+- It also reads the files' own metadata (title, show, episode, IMDb ID), which many ripped or downloaded files carry, so a folder called just *Season 01* is fine.
+- With **web search** on and a provider that supports it (OpenRouter, Perplexity, Gemini, Anthropic, OpenAI search models), the AI searches distinctive lines word for word (transcript, subtitle and quote sites) to find the show, the episode and who says them, and cross-checks with the file names, metadata, timestamps and cast.
+- If nothing names the show, the AI may still recognise it from the dialogue; the toolkit then fetches that show's cast and asks once more, and remembers the show for later files.
 - Each card then shows its answer, e.g. *AI: Carmela Soprano (Edie Falco) · high*; hover for the reason, and **Use this name** to accept it.
 - With **Name cards automatically**, "Person N" cards get the name when the AI is sure. Names you typed are never changed.
 - With **Merge cards automatically**, two cards the AI is sure are the same character are merged, but only if their voices are also somewhat alike. Otherwise they show up as *Maybe the same as …: AI thinks both are …* for you to decide.

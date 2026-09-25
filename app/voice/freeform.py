@@ -24,6 +24,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -223,6 +224,29 @@ def probe_tracks(source: Path) -> List[Dict[str, Any]]:
     return tracks
 
 
+_USEFUL_TAGS = ("title", "show", "series", "season_number", "episode_id", "episode_sort", "date", "year",
+                "description", "synopsis", "comment", "imdb", "imdb_id", "tmdb", "network", "artist", "album")
+
+
+def file_tags(source: Path) -> Dict[str, str]:
+    """The container's own metadata (title, show, episode, IMDb ID...), for identifying speakers."""
+    try:
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format_tags", "-of", "json", str(source)],
+            capture_output=True, timeout=60,
+        )
+        tags = json.loads(proc.stdout or b"{}").get("format", {}).get("tags") or {}
+    except (OSError, ValueError, subprocess.TimeoutExpired) as err:
+        _LOGGER.warning("Couldn't read the metadata of %s: %s", source.name, err)
+        return {}
+    useful = {}
+    for key, value in tags.items():
+        key, value = key.lower(), " ".join(str(value).split())
+        if value and (key in _USEFUL_TAGS or re.search(r"\btt\d{7,9}\b", value)):
+            useful[key] = value[:200]
+    return dict(list(useful.items())[:12])
+
+
 def recommended_track(tracks: List[Dict[str, Any]], voice_language: str) -> int:
     """The voice's language, not a commentary, the default track, most channels."""
     want = voice_language.split("-")[0].lower()
@@ -369,6 +393,7 @@ def start(voice: Voice, source: Path, denoise: Any = "light", diarize: bool = Fa
         "denoise": _level(denoise), "diarize": bool(diarize),
         "source": source.name, "size": size, "name": " ".join(str(name).split())[:200],
         "tracks": tracks, "track": recommended, "dialogue": tracks[recommended]["surround"],
+        "tags": file_tags(source),
     }
     _LOGGER.info("Freeform take %s/%s uploaded: %s (%.1f MB), %d audio track(s)",
                  voice.name, take_id, source.name, size / 2**20, len(tracks))

@@ -51,9 +51,17 @@ _GENERIC_FOLDER = re.compile(
 SYSTEM = (
     "You identify who is speaking in transcribed dialogue from TV series and films. "
     "Each numbered person is one voice that was grouped automatically, so a person may occasionally "
-    "include a few lines from someone else. Use the cast list, the file names, the dialogue and your "
-    "knowledge (and web search if you have it). Answer with JSON only, no other text."
+    "include a few lines from someone else. Use the cast list, the file names and metadata, the "
+    "dialogue (names people call each other) and your knowledge. Answer with JSON only, no other text."
 )
+SEARCH_HINT = (
+    "You can search the web: search a few of the most distinctive lines word for word, in quotes "
+    "(episode transcripts, subtitle and quote sites), to find which show and episode they are from "
+    "and which character says them, and check it against the file names, metadata, timestamps and cast. "
+    "The lines are machine transcriptions, so a word may be slightly off: if an exact search finds "
+    "nothing, try a shorter part of the line."
+)
+_NAME_WORD = re.compile(r"(?<=[a-z,] )[A-Z][a-z]+")
 
 _running: Set[str] = set()
 _again: Set[str] = set()
@@ -77,10 +85,29 @@ def status(voice: Voice) -> Dict[str, Any]:
 _EPISODE_NAME = re.compile(r"^(.+?)[\s._-]*(?:s\d{1,2}[\s._-]?e\d{1,3}|\d{1,2}x\d{2})", re.IGNORECASE)
 
 
-def _show_hints(files: List[str]) -> Tuple[List[str], List[str]]:
-    """IMDb IDs and show names (top-level folder) from file paths."""
-    ids = list(dict.fromkeys(m for f in files for m in _IMDB_ID.findall(f)))
+def _show_from_title(text: str) -> str:
+    """ "The.Sopranos.S01E01.720p" -> "The Sopranos" ("" without an episode number)."""
+    m = _EPISODE_NAME.match(text)
+    if not m:
+        return ""
+    name = re.sub(r"[._]+", " ", m.group(1)).strip(" -([")
+    name = re.sub(r"\s*\(?(19|20)\d\d\)?$", "", name).strip()
+    return "" if _GENERIC_FOLDER.match(name) else name
+
+
+def _show_hints(files: List[str], tags: Optional[Dict[str, Dict[str, str]]] = None) -> Tuple[List[str], List[str]]:
+    """IMDb IDs and show names from file metadata, folders and file names."""
+    tags = tags or {}
+    file_tags = [tags.get(f) or {} for f in files]
+    ids = list(dict.fromkeys(
+        m for f, t in zip(files, file_tags) for text in (f, *t.values()) for m in _IMDB_ID.findall(text)
+    ))
     names = []
+    for t in file_tags:
+        # Metadata first: a "show" tag, or a title like "The Sopranos - S01E01 - Pilot"
+        for value in (t.get("show"), t.get("series"), _show_from_title(t.get("title") or "")):
+            if value and not _GENERIC_FOLDER.match(value):
+                names.append(value)
     for f in files:
         # The first folder that looks like a show's name: "The Sopranos/Season 1/..."
         for folder in f.split("/")[:-1]:
@@ -90,19 +117,19 @@ def _show_hints(files: List[str]) -> Tuple[List[str], List[str]]:
                 break
     for f in files:
         # Or the file name before the episode number: "The.Sopranos.S01E01.720p.mkv"
-        m = _EPISODE_NAME.match(f.split("/")[-1])
-        if m:
-            name = re.sub(r"[._]+", " ", m.group(1)).strip(" -([")
-            name = re.sub(r"\s*\(?(19|20)\d\d\)?$", "", name).strip()
-            if name and not _GENERIC_FOLDER.match(name):
-                names.append(name)
+        name = _show_from_title(f.split("/")[-1])
+        if name:
+            names.append(name)
     names = list(dict.fromkeys(names))
     return ids, names
 
 
-async def cast_lookup(files: List[str]) -> Tuple[str, List[str]]:
+async def cast_lookup(files: List[str], tags: Optional[Dict[str, Dict[str, str]]] = None,
+                      known_show: Optional[str] = None) -> Tuple[str, List[str]]:
     """("Show title", ["Character (Actor)", ...]) from TVmaze, or ("", [])."""
-    ids, names = _show_hints(files)
+    ids, names = _show_hints(files, tags)
+    if known_show:  # the show the AI recognised last time
+        names = [re.sub(r"\s*\((19|20)\d\d\)$", "", known_show)] + [n for n in names if n != known_show]
     if not ids and not names:
         return "", []
     async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
@@ -138,13 +165,45 @@ async def cast_lookup(files: List[str]) -> Tuple[str, List[str]]:
 # ---- Asking the AI ------------------------------------------------------------------
 
 
+def _clock(seconds: Optional[float]) -> str:
+    if seconds is None:
+        return ""
+    s = int(seconds)
+    return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
+
+
+def _distinctive(lines: List[Dict[str, Any]], count: int = LINES_PER_PERSON) -> List[Dict[str, Any]]:
+    """The lines most worth searching: long, with names in them, from different files."""
+    def score(line: Dict[str, Any]) -> float:
+        text = line["text"]
+        return min(len(text), 120) + 25 * len(_NAME_WORD.findall(text)) - (40 if len(text.split()) < 5 else 0)
+
+    unique: Dict[str, Dict[str, Any]] = {}
+    for line in lines:  # the same line in several files: once is enough
+        unique.setdefault(re.sub(r"\W+", " ", line["text"].lower()).strip(), line)
+    ranked = sorted(unique.values(), key=score, reverse=True)
+    picked, seen_files = [], set()
+    for line in ranked:  # one per file first, then the rest
+        if line.get("file") not in seen_files:
+            picked.append(line)
+            seen_files.add(line.get("file"))
+    picked += [line for line in ranked if line not in picked]
+    return picked[:count]
+
+
 def _prompt(people: List[Dict[str, Any]], named: List[Dict[str, Any]], files: List[str],
-            show: str, cast: List[str]) -> str:
+            show: str, cast: List[str], tags: Optional[Dict[str, Dict[str, str]]] = None,
+            web_search: bool = False) -> str:
+    tags = tags or {}
     parts = []
     if files:
-        parts.append("Files these people were found in (up to 40):\n" + "\n".join(f"- {f}" for f in files[:40]))
+        rows = []
+        for f in files[:40]:
+            meta = "; ".join(f"{k}: {v}" for k, v in (tags.get(f) or {}).items())
+            rows.append(f"- {f}" + (f"  [metadata: {meta}]" if meta else ""))
+        parts.append("Files these people were found in (up to 40):\n" + "\n".join(rows))
     if cast:
-        parts.append(f"Cast of {show} (from TVmaze, character (actor); found from the file names, "
+        parts.append(f"Cast of {show} (from TVmaze, character (actor); found from the file names or metadata, "
                      "so ignore it if it clearly doesn't fit the dialogue):\n" + "; ".join(cast))
     if named:
         parts.append("Already named by the user, trust these:\n" + "\n".join(
@@ -152,14 +211,19 @@ def _prompt(people: List[Dict[str, Any]], named: List[Dict[str, Any]], files: Li
     blocks = []
     for p in people:
         lines = "\n".join(
-            f'  - "{line["text"]}"' + (f' ({line["file"]})' if line.get("file") else "")
-            for line in p.get("lines", [])[-LINES_PER_PERSON:]
+            f'  - "{line["text"]}"'
+            + (f' ({line["file"]}' + (f' at {_clock(line.get("at"))}' if line.get("at") is not None else "") + ")"
+               if line.get("file") else "")
+            for line in _distinctive(p.get("lines", []))
         )
         blocks.append(f'{p["id"]} ({round(p["seconds"] / 60, 1)} min of speech, in {len(p["takes"])} files):\n{lines}')
     parts.append("People to identify:\n\n" + "\n\n".join(blocks))
+    if web_search:
+        parts.append(SEARCH_HINT)
     parts.append(
         'For each person above, who is speaking? Reply with JSON only:\n'
-        '{"people": [{"id": "p3", "name": "Character name", "actor": "Actor name or null", '
+        '{"show": "Show or film title (year), or null", '
+        '"people": [{"id": "p3", "name": "Character name", "actor": "Actor name or null", '
         '"confidence": "high|medium|low", "reason": "one short sentence"}]}\n'
         'Use name "mixed" if their lines clearly come from several characters, and null if you '
         'cannot tell. Give the same name to every person who is the same character.'
@@ -168,6 +232,11 @@ def _prompt(people: List[Dict[str, Any]], named: List[Dict[str, Any]], files: Li
 
 
 def _parse(reply: str) -> List[Dict[str, Any]]:
+    return _parse_reply(reply)[1]
+
+
+def _parse_reply(reply: str) -> Tuple[Optional[str], List[Dict[str, Any]]]:
+    """(show the AI recognised or None, answers per person)."""
     text = reply.strip()
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end <= start:
@@ -176,7 +245,9 @@ def _parse(reply: str) -> List[Dict[str, Any]]:
         data = json.loads(text[start:end + 1])
     except ValueError as err:
         raise providers.ProviderError(f"The AI's answer wasn't valid JSON ({err}). Try another model.") from err
-    return [p for p in data.get("people", []) if isinstance(p, dict) and p.get("id")]
+    show = data.get("show")
+    show = " ".join(show.split())[:120] if isinstance(show, str) and show.strip().lower() not in ("", "null", "unknown") else None
+    return show, [p for p in data.get("people", []) if isinstance(p, dict) and p.get("id")]
 
 
 def _set_status(voice: Voice, **values: Any) -> None:
@@ -205,25 +276,37 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
         return speakers.public(voice)
 
     files = list(dict.fromkeys(line["file"] for p in candidates for line in p.get("lines", []) if line.get("file")))
+    tags = data.get("files") or {}
+    known_show = (data.get("ai") or {}).get("show")
     show, cast = "", []
     if options["castLookup"]:
-        try:
-            show, cast = await cast_lookup(files)
-        except (httpx.HTTPError, ValueError, KeyError) as err:
-            _LOGGER.warning("TVmaze cast lookup failed: %s", err)
+        show, cast = await _safe_cast_lookup(files, tags, known_show)
     named = [p for p in data["people"] if not _DEFAULT_NAME.match(p["name"])]
+    searching = bool(options["webSearch"] and providers.web_search_support(conn))
+
+    async def ask(show: str, cast: List[str]) -> Tuple[Optional[str], List[Dict[str, Any]]]:
+        reply = await providers.chat(
+            conn,
+            [{"role": "user", "content": _prompt(candidates, named, files, show, cast, tags, searching)}],
+            system=SYSTEM,
+            temperature=0.2,
+            max_tokens=min(8000, 400 + 120 * len(candidates)),
+            web_search=options["webSearch"],
+        )
+        return _parse_reply(reply)
 
     _set_status(voice, state="running", error=None, cast=show or None)
     started = time.monotonic()
-    reply = await providers.chat(
-        conn,
-        [{"role": "user", "content": _prompt(candidates, named, files, show, cast)}],
-        system=SYSTEM,
-        temperature=0.2,
-        max_tokens=min(8000, 400 + 120 * len(candidates)),
-        web_search=options["webSearch"],
-    )
-    answers = {a["id"]: a for a in _parse(reply)}
+    recognised, answer_list = await ask(show, cast)
+    if recognised and not cast and options["castLookup"]:
+        # The AI recognised the show from the dialogue: get its cast and ask once more with it
+        show, cast = await _safe_cast_lookup([], {}, recognised)
+        if cast:
+            _set_status(voice, state="running", cast=show)
+            _LOGGER.info("AI recognised %s from the dialogue; asking again with its cast", show)
+            again, answer_list = await ask(show, cast)
+            recognised = again or recognised
+    answers = {a["id"]: a for a in answer_list}
 
     renamed = 0
     with speakers._lock:
@@ -246,7 +329,7 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
                 person["name"] = name[:40]
                 renamed += 1
         data["ai"] = {"state": "done", "error": None, "at": time.time(), "cast": show or None,
-                      "identified": len(answers)}
+                      "identified": len(answers), "show": show or recognised or known_show}
         speakers._save(voice, data)
 
     merged = _auto_merge(voice) if options.get("autoMerge") else 0
@@ -254,6 +337,15 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
                  voice.name, len(answers), len(candidates), renamed, merged, time.monotonic() - started,
                  f" (cast: {show})" if show else "")
     return speakers.public(voice)
+
+
+async def _safe_cast_lookup(files: List[str], tags: Dict[str, Dict[str, str]],
+                            known_show: Optional[str]) -> Tuple[str, List[str]]:
+    try:
+        return await cast_lookup(files, tags, known_show)
+    except (httpx.HTTPError, ValueError, KeyError) as err:
+        _LOGGER.warning("TVmaze cast lookup failed: %s", err)
+        return "", []
 
 
 def _auto_merge(voice: Voice) -> int:

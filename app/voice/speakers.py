@@ -136,13 +136,14 @@ def _unit(vector: List[float]) -> np.ndarray:
 
 def _add_lines(person: Dict[str, Any], take: Dict[str, Any], speaker_id: int) -> None:
     """Remember the speaker's longest lines in this take (newest files last)."""
-    texts = sorted(
-        {s["text"].strip() for s in take.get("segments", []) if s.get("speaker") == speaker_id and s.get("text")},
-        key=len, reverse=True,
-    )[:4]
+    starts: Dict[str, float] = {}
+    for s in take.get("segments", []):
+        if s.get("speaker") == speaker_id and s.get("text"):
+            starts.setdefault(s["text"].strip(), s.get("start") or 0.0)
+    texts = sorted(starts, key=len, reverse=True)[:4]
     name = take.get("name") or ""
     lines = person.setdefault("lines", [])
-    lines.extend({"text": t[:240], "file": name} for t in texts)
+    lines.extend({"text": t[:240], "file": name, "at": round(starts[t], 1)} for t in texts)
     del lines[:-MAX_LINES]
 
 
@@ -153,6 +154,11 @@ def link(voice: Voice, take_id: str, take: Dict[str, Any]) -> None:
         return
     with _lock:
         data = load(voice)
+        if take.get("tags") and take.get("name"):
+            # File metadata (title, show, IMDb ID...) for AI identification
+            data.setdefault("files", {})[take["name"]] = take["tags"]
+            if len(data["files"]) > 2000:
+                data["files"] = dict(list(data["files"].items())[-2000:])
         people = data["people"]
         known = [_unit(p["centroid"]) for p in people]
         # Best pairs first; each person at most once per take

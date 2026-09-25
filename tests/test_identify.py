@@ -57,7 +57,7 @@ def test_show_hints_from_paths():
 def test_identify_names_and_auto_merges(voice, monkeypatch):
     seen = {}
 
-    async def fake_cast(files):
+    async def fake_cast(files, *args):
         seen["files"] = files
         return "The Sopranos (1999)", ["Tony Soprano (James Gandolfini)", "Carmela Soprano (Edie Falco)"]
 
@@ -98,7 +98,7 @@ def test_auto_merge_off_only_suggests(voice, monkeypatch):
         return ('{"people": [{"id": "p1", "name": "Tony Soprano", "confidence": "high"},'
                 '{"id": "p2", "name": "Tony Soprano", "confidence": "medium"}]}')
 
-    async def no_cast(files):
+    async def no_cast(files, *args):
         return "", []
 
     monkeypatch.setattr(identify, "cast_lookup", no_cast)
@@ -119,3 +119,44 @@ def test_show_name_from_episode_file_names():
         "Season 1/S01E03 - Denial.mkv", "Season 1/sopranos_1x04.avi",
     ])
     assert names == ["The Sopranos", "sopranos"]
+
+
+def test_show_from_file_metadata():
+    ids, names = identify._show_hints(
+        ["Season 01/S01E01.mkv", "Season 01/S01E02.mkv"],
+        {"Season 01/S01E01.mkv": {"title": "The Sopranos - S01E01 - Pilot"},
+         "Season 01/S01E02.mkv": {"show": "The Sopranos", "comment": "imdb tt0705276"}},
+    )
+    assert names == ["The Sopranos"] and ids == ["tt0705276"]
+
+
+def test_distinctive_lines_prefer_names_and_spread_over_files():
+    lines = [{"text": "Yeah.", "file": "a"}, {"text": "I told you already, it is not my problem anymore.", "file": "a"},
+             {"text": "Go ask Paulie and Christopher about it tonight.", "file": "a"},
+             {"text": "What do you want from me here?", "file": "b"}]
+    picked = identify._distinctive(lines, 2)
+    assert picked[0]["text"].startswith("Go ask Paulie") and picked[1]["file"] == "b"
+
+
+def test_recognised_show_gets_cast_and_second_pass(voice, monkeypatch):
+    prompts, lookups = [], []
+
+    async def fake_cast(files, tags=None, known_show=None):
+        lookups.append(known_show)
+        return ("The Sopranos (1999)", ["Tony Soprano (James Gandolfini)"]) if known_show else ("", [])
+
+    async def fake_chat(conn, messages, **kwargs):
+        prompts.append(messages[0]["content"])
+        if len(prompts) == 1:
+            return '{"show": "The Sopranos (1999)", "people": [{"id": "p1", "name": "Tony Soprano", "confidence": "medium"}]}'
+        return '{"show": "The Sopranos (1999)", "people": [{"id": "p1", "name": "Tony Soprano", "confidence": "high"}]}'
+
+    monkeypatch.setattr(identify, "cast_lookup", fake_cast)
+    monkeypatch.setattr(identify.providers, "chat", fake_chat)
+    monkeypatch.setattr("app.voice.freeform.retag_person", lambda *a: None)
+    result = asyncio.run(identify.identify(voice))
+
+    assert len(prompts) == 2 and "Tony Soprano (James Gandolfini)" in prompts[1]
+    assert "word for word" in prompts[0]  # openrouter supports web search: quote-search hint
+    assert result["ai"]["show"] == "The Sopranos (1999)"
+    assert {p["id"]: p for p in result["people"]}["p1"]["ai"]["confidence"] == "high"
