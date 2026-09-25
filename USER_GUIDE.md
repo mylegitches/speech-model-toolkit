@@ -126,7 +126,7 @@ Every file is compared with the people found in your earlier files, so the same 
 
 **Let AI name them (optional).** With an AI connection and **Speaker identification** turned on in Settings, the AI reads a few lines each person said and works out who they are, for a whole series too:
 
-- It looks up the cast on TVmaze. Put the show in a folder named after it (`The Sopranos/Season 1/S01E01.mkv`), or include the IMDb ID in a file name (`… tt0141842.mkv`). Folders like *Season 1* or *Disc 2* are ignored.
+- It looks up the cast on TVmaze. Put the show in a folder named after it (`The Sopranos/Season 1/S01E01.mkv`), name the episodes after it (`The.Sopranos.S01E01.720p.mkv`), or include the IMDb ID in a file name (`… tt0141842.mkv`). Folders like *Season 1* or *Disc 2* are ignored.
 - With **web search** on and a provider that supports it (OpenRouter, Perplexity, Gemini, Anthropic, OpenAI search models), it can also look things up online.
 - Each card then shows its answer, e.g. *AI: Carmela Soprano (Edie Falco) · high*; hover for the reason, and **Use this name** to accept it.
 - With **Name cards automatically**, "Person N" cards get the name when the AI is sure. Names you typed are never changed.

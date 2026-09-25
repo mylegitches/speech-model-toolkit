@@ -74,6 +74,9 @@ def status(voice: Voice) -> Dict[str, Any]:
 # ---- Cast lookup (TVmaze) --------------------------------------------------------
 
 
+_EPISODE_NAME = re.compile(r"^(.+?)[\s._-]*(?:s\d{1,2}[\s._-]?e\d{1,3}|\d{1,2}x\d{2})", re.IGNORECASE)
+
+
 def _show_hints(files: List[str]) -> Tuple[List[str], List[str]]:
     """IMDb IDs and show names (top-level folder) from file paths."""
     ids = list(dict.fromkeys(m for f in files for m in _IMDB_ID.findall(f)))
@@ -85,6 +88,14 @@ def _show_hints(files: List[str]) -> Tuple[List[str], List[str]]:
             if folder and not _GENERIC_FOLDER.match(folder):
                 names.append(folder)
                 break
+    for f in files:
+        # Or the file name before the episode number: "The.Sopranos.S01E01.720p.mkv"
+        m = _EPISODE_NAME.match(f.split("/")[-1])
+        if m:
+            name = re.sub(r"[._]+", " ", m.group(1)).strip(" -([")
+            name = re.sub(r"\s*\(?(19|20)\d\d\)?$", "", name).strip()
+            if name and not _GENERIC_FOLDER.match(name):
+                names.append(name)
     names = list(dict.fromkeys(names))
     return ids, names
 

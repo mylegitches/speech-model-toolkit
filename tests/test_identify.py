@@ -111,3 +111,11 @@ def test_auto_merge_off_only_suggests(voice, monkeypatch):
 def test_generic_folders_are_not_show_names():
     _, names = identify._show_hints(["Season 1/ep1.mp4", "Downloads/Disc 2/x.mkv", "Videos/The Wire/S01/e1.mkv"])
     assert names == ["The Wire"]
+
+
+def test_show_name_from_episode_file_names():
+    _, names = identify._show_hints([
+        "Season 01/The.Sopranos.S01E01.720p.BluRay.mkv", "Season 01/The Sopranos (1999) - S01E02 - 46 Long.mkv",
+        "Season 1/S01E03 - Denial.mkv", "Season 1/sopranos_1x04.avi",
+    ])
+    assert names == ["The Sopranos", "sopranos"]
