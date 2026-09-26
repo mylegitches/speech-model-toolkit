@@ -272,12 +272,14 @@ async def chat(
     web_search: bool = False,
     timeout: Optional[float] = None,
     think: Optional[bool] = None,
+    json_mode: bool = False,
 ) -> str:
     """Send a conversation ([{role: user|assistant, content}]) and return the reply text.
 
     web_search lets the model search the web where the provider supports it
     (see web_search_support); elsewhere it's ignored. think=False asks
-    thinking models to answer without reasoning first (Ollama)."""
+    thinking models to answer without reasoning first (Ollama). json_mode makes
+    Ollama return valid JSON (its "format" option); other providers are asked in the prompt."""
     provider = get_provider(conn.get("provider", ""))
     model = (conn.get("model") or "").strip()
     if not model:
@@ -299,7 +301,7 @@ async def chat(
         try:
             try:
                 reply = await _chat(client, provider, base, headers, model, messages, system, temperature,
-                                    max_tokens, search, think)
+                                    max_tokens, search, think, json_mode)
             except ProviderError as err:
                 # Models without a thinking switch may reject it: ask again without
                 if think is None or "think" not in str(err).lower():
@@ -307,7 +309,7 @@ async def chat(
                 _LOGGER.info("AI %s/%s rejected think=%s; retrying without it", provider.id, model, think)
                 think = None
                 reply = await _chat(client, provider, base, headers, model, messages, system, temperature,
-                                    max_tokens, search)
+                                    max_tokens, search, None, json_mode)
             _LOGGER.info("AI %s/%s answered in %.1fs (%d chars)", provider.id, model, time.monotonic() - started, len(reply))
             return reply
         except ProviderError as err:
@@ -316,7 +318,7 @@ async def chat(
             if "temperature" in str(err).lower() and temperature is not None:
                 _LOGGER.info("AI %s/%s rejected the temperature; retrying without it", provider.id, model)
                 return await _chat(client, provider, base, headers, model, messages, system, None, max_tokens,
-                                   search, think)
+                                   search, think, json_mode)
             _LOGGER.warning("AI %s/%s failed after %.1fs: %s", provider.id, model, time.monotonic() - started, err)
             raise
     finally:
@@ -336,6 +338,7 @@ async def _chat(
     max_tokens: int,
     search: bool = False,
     think: Optional[bool] = None,
+    json_mode: bool = False,
 ) -> str:
     if provider.api == "anthropic":
         text, finish = await _anthropic_chat(client, base, headers, model, messages, system, temperature, max_tokens, search)
@@ -377,6 +380,8 @@ async def _chat(
         }
         if think is not None:
             body["think"] = think
+        if json_mode:
+            body["format"] = "json"
         data = await _request(client, "POST", f"{base}/api/chat", headers, body)
         text = (data.get("message") or {}).get("content", "")
         finish = data.get("done_reason") or ""

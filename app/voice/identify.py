@@ -229,7 +229,7 @@ def _prompt(people: List[Dict[str, Any]], named: List[Dict[str, Any]], files: Li
         'For each person above, who is speaking? Reply with JSON only:\n'
         '{"show": "Show or film title (year), or null", '
         '"people": [{"id": "p3", "name": "Character name", "actor": "Actor name or null", '
-        '"confidence": "high|medium|low", "reason": "one short sentence"}]}\n'
+        '"confidence": "high|medium|low", "reason": "one short sentence, no double quotes"}]}\n'
         'Use name "mixed" if their lines clearly come from several characters, and null if you '
         'cannot tell. Give the same name to every person who is the same character.'
     )
@@ -249,10 +249,42 @@ def _parse_reply(reply: str) -> Tuple[Optional[str], List[Dict[str, Any]]]:
     try:
         data = json.loads(text[start:end + 1])
     except ValueError as err:
-        raise providers.ProviderError(f"The AI's answer wasn't valid JSON ({err}). Try another model.") from err
+        # Often one unescaped quote in a "reason": keep every answer that can still be read
+        data = _salvage(text[start:end + 1])
+        if not data["people"]:
+            raise providers.ProviderError(f"The AI's answer wasn't valid JSON ({err}). Try another model.") from err
+        _LOGGER.info("The AI's JSON was broken (%s); recovered %d answers", err, len(data["people"]))
     show = data.get("show")
     show = " ".join(show.split())[:120] if isinstance(show, str) and show.strip().lower() not in ("", "null", "unknown") else None
     return show, [p for p in data.get("people", []) if isinstance(p, dict) and p.get("id")]
+
+
+_OBJECT = re.compile(r'\{[^{}]*?"id"\s*:\s*"(p\d+)"[^{}]*\}')
+
+
+def _field(chunk: str, key: str) -> Optional[str]:
+    m = re.search(rf'"{key}"\s*:\s*(null|"((?:[^"\\]|\\.)*)")', chunk)
+    if not m or m.group(1) == "null":
+        return None
+    try:
+        return json.loads(f'"{m.group(2)}"')
+    except ValueError:
+        return m.group(2)
+
+
+def _salvage(text: str) -> Dict[str, Any]:
+    """Best effort for broken JSON: each person's object on its own, else its fields one by one."""
+    people = []
+    for m in _OBJECT.finditer(text):
+        try:
+            people.append(json.loads(m.group(0)))
+            continue
+        except ValueError:
+            pass
+        chunk = m.group(0)
+        people.append({"id": m.group(1), "name": _field(chunk, "name"), "actor": _field(chunk, "actor"),
+                       "confidence": _field(chunk, "confidence") or "low", "reason": ""})
+    return {"show": _field(text[:300], "show"), "people": people}
 
 
 def _set_status(voice: Voice, **values: Any) -> None:
@@ -298,7 +330,8 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
         budget = min(MAX_TOKENS, 3000 + 150 * len(batch))
         try:
             reply = await providers.chat(conn, prompt, system=SYSTEM, temperature=0.2, max_tokens=budget,
-                                         web_search=options["webSearch"], timeout=REQUEST_TIMEOUT, think=False)
+                                         web_search=options["webSearch"], timeout=REQUEST_TIMEOUT, think=False,
+                                         json_mode=True)
         except providers.EmptyAnswer as err:
             if not err.out_of_tokens or budget >= RETRY_MAX_TOKENS:
                 raise
@@ -306,7 +339,7 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
             try:
                 reply = await providers.chat(conn, prompt, system=SYSTEM, temperature=0.2,
                                              max_tokens=RETRY_MAX_TOKENS, web_search=options["webSearch"],
-                                             timeout=REQUEST_TIMEOUT, think=False)
+                                             timeout=REQUEST_TIMEOUT, think=False, json_mode=True)
             except providers.ProviderError as retry_err:
                 if isinstance(retry_err, providers.EmptyAnswer):
                     raise
@@ -329,11 +362,20 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
     started = time.monotonic()
     answered = renamed = 0
     recognised = None
+    failed: List[str] = []
     for n, batch in enumerate(batches):
         if n:
             _set_status(voice, state="running", detail=f"group {n + 1} of {len(batches)}")
         named = known_names(batch)
-        found_show, answer_list = await ask(batch, named, show, cast)
+        try:
+            found_show, answer_list = await ask(batch, named, show, cast)
+        except providers.ProviderError as err:
+            if len(batches) == 1:
+                raise
+            # Keep going with the other groups; this one is asked again next run
+            _LOGGER.warning("AI identification for %s, group %d of %d failed: %s", voice.name, n + 1, len(batches), err)
+            failed.append(str(err))
+            continue
         recognised = recognised or found_show
         if found_show and not cast and options["castLookup"]:
             # The AI recognised the show from the dialogue: get its cast and ask again with it
@@ -350,6 +392,9 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
         data = speakers.load(voice)
         data["ai"] = {"state": "done", "error": None, "at": time.time(), "cast": show or None,
                       "identified": answered, "show": show or recognised or known_show, "detail": None}
+        if failed:
+            data["ai"].update(state="error" if len(failed) == len(batches) else "done",
+                              error=f"{len(failed)} of {len(batches)} groups failed: {failed[-1]}")
         speakers._save(voice, data)
 
     merged = _auto_merge(voice) if options.get("autoMerge") else 0

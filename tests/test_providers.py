@@ -259,3 +259,10 @@ def test_ollama_think_switch_and_fallback():
     conn = {"provider": "ollama-cloud", "apiKey": "k", "model": "m"}
     assert run(providers.chat(conn, [{"role": "user", "content": "hi"}], client=client, think=False)) == "OK"
     assert bodies[0]["think"] is False and "think" not in bodies[1]
+
+
+def test_ollama_json_mode():
+    client, seen = mock_client(lambda r: (200, {"message": {"content": "{}"}}))
+    conn = {"provider": "ollama-cloud", "apiKey": "k", "model": "m"}
+    run(providers.chat(conn, [{"role": "user", "content": "hi"}], client=client, json_mode=True))
+    assert body(seen[0])["format"] == "json"

@@ -215,3 +215,13 @@ def test_many_people_are_asked_in_groups(voice, monkeypatch):
     result = asyncio.run(identify.identify(voice))
     assert len(prompts) == 2 and result["ai"]["identified"] == 4
     assert "p1 = Tony Soprano (AI, medium)" in prompts[1]  # earlier answers carried over
+
+
+def test_broken_json_keeps_readable_answers():
+    reply = ('{"show": "The Sopranos (1999)", "people": ['
+             '{"id": "p1", "name": "Tony Soprano", "actor": "James Gandolfini", "confidence": "high", "reason": "says "T" a lot"},'
+             '{"id": "p2", "name": "Carmela Soprano", "actor": null, "confidence": "medium", "reason": "fine"}]}')
+    show, people = identify._parse_reply(reply)
+    assert show == "The Sopranos (1999)"
+    assert [(p["id"], p["name"], p["confidence"]) for p in people] == [
+        ("p1", "Tony Soprano", "high"), ("p2", "Carmela Soprano", "medium")]
