@@ -39,6 +39,7 @@ async function loadOptions() {
   options.voices.forEach((v) => voice.add(new Option(
     v.id === 'default' && !v.ready ? `${v.label} · downloads on first use` : v.label, v.id)));
   if (options.voices.some((v) => v.id === keepVoice)) voice.value = keepVoice;
+  loadSpeed();
 
   const a = options.assistant;
   const pill = $('#mode-pill');
@@ -69,9 +70,35 @@ $('#wakeword-select').addEventListener('change', (e) => {
   SMT_lab('wakeword', e.target.value);
   if (ws) { stop(); start(); }
 });
+/** Speed is stored per voice under the Voice tab's key (speed:<voice name>), so both tabs agree. */
+function speedKey() {
+  const id = $('#voice-select').value || 'default';
+  return `speed:${id.startsWith('voice:') ? id.slice(6) : id}`;
+}
+
+function speed() {
+  return Number($('#speed').value) || 100;
+}
+
+function loadSpeed() {
+  let saved = 100;
+  try { saved = Number(localStorage.getItem(speedKey())) || 100; } catch (e) { /* ignore */ }
+  $('#speed').value = saved;
+  $('#speed-value').textContent = `${speed()}%`;
+}
+
+$('#speed').addEventListener('input', () => {
+  $('#speed-value').textContent = `${speed()}%`;
+  try { localStorage.setItem(speedKey(), String(speed())); } catch (e) { /* ignore */ }
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'speed', speed: speed() }));
+});
+
 $('#voice-select').addEventListener('change', (e) => {
   SMT_lab('voice', e.target.value);
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'voice', voice: e.target.value }));
+  loadSpeed();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'voice', voice: e.target.value, speed: speed() }));
+  }
 });
 
 // ---- Session ----------------------------------------------------------------------
@@ -105,7 +132,7 @@ async function start() {
   ws = new WebSocket(`${proto}://${location.host}${base}api/session`);
   ws.binaryType = 'arraybuffer';
   ws.onopen = async () => {
-    ws.send(JSON.stringify({ type: 'start', wakeword, voice: $('#voice-select').value }));
+    ws.send(JSON.stringify({ type: 'start', wakeword, voice: $('#voice-select').value, speed: speed() }));
     try {
       await startCapture();
     } catch (err) {
@@ -313,7 +340,7 @@ $('#ask-form').addEventListener('submit', async (e) => {
     const res = await fetch('api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voice: $('#voice-select').value, history: priorHistory }),
+      body: JSON.stringify({ text, voice: $('#voice-select').value, speed: speed(), history: priorHistory }),
     });
     if (!res.ok) throw new Error(await SMT.errorMessage(res));
     const data = await res.json();
@@ -376,3 +403,8 @@ window.addEventListener('message', (e) => {
 });
 
 loadOptions().then(() => stop());
+
+// The Voice tab changed this voice's speed: follow it
+window.addEventListener('storage', (e) => {
+  if (e.key === speedKey()) loadSpeed();
+});

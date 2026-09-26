@@ -90,6 +90,7 @@ The app is one page with five tabs: **Home, Wake Word, Voice, Test Lab, Settings
 
 - Type anything and hear the voice speak it, even *during* training ("Export latest version now").
 - **Download for Home Assistant:** `.onnx` + `.onnx.json`, named the way Home Assistant's Piper add-on expects, with step-by-step install instructions on the page.
+- **Speed control without retraining:** a slider (60–130%) previews the voice slower or faster; downloads carry the speed in the model config (Piper's `length_scale`) and in the file name (`en_US-tony_speed85-medium`), so several speeds can sit side by side in Home Assistant. The Test Lab uses the same per-voice speed.
 
 ### 🧪 Test Lab: your wake word + your voice = a working assistant
 

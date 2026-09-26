@@ -549,22 +549,25 @@ class TrainingManager:
         workspace.exporting = True
         asyncio.create_task(self._export_guarded(workspace))
 
-    async def speak(self, workspace: Workspace, export_dir: str, text: str) -> bytes:
-        """Synthesize text with an exported voice."""
+    async def speak(self, workspace: Workspace, export_dir: str, text: str,
+                    length_scale: Optional[float] = None) -> bytes:
+        """Synthesize text with an exported voice (length_scale > 1 speaks slower)."""
         model_paths = list((workspace.exports_dir / export_dir).glob("*.onnx"))
         if not model_paths:
             raise FileNotFoundError("Voice not exported")
 
-        return await self.synthesize(model_paths[0], text)
+        return await self.synthesize(model_paths[0], text, length_scale)
 
-    async def synthesize(self, model_path: Path, text: str) -> bytes:
+    async def synthesize(self, model_path: Path, text: str, length_scale: Optional[float] = None) -> bytes:
         """Synthesize text with any Piper .onnx voice (next to its .onnx.json); returns WAV."""
+        speed = ["--length-scale", f"{length_scale:g}"] if length_scale else []
         proc = await asyncio.create_subprocess_exec(
             self.python,
             "-m",
             "piper",
             "-m",
             str(model_path),
+            *speed,
             "--output-file",
             "-",  # WAV to stdout
             "--",

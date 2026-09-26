@@ -188,6 +188,7 @@ A GPU makes a huge difference: hours instead of days. If voice training runs on 
 
 1. Pick a **Version** (each export is a snapshot of the training), type any text and click **🔊 Speak**.
 2. While training runs, **Export latest version now** lets you hear how it's going.
+   **Speed**: too fast or too slow? Move the slider (60–130%) and Speak again. The downloads then speak at that speed (it's stored in the `.onnx.json` as Piper's `length_scale`) and carry it in their name, e.g. `en_US-tony_speed85-medium`, so you can keep several speeds side by side. No retraining needed. The speed is remembered per voice and also used by the Test Lab. If Home Assistant still plays it at normal speed, its Piper add-on's own *length_scale* option is overriding it: set that option to the number shown on the page.
 3. Click **Download for Home Assistant (.zip)**.
 4. In Home Assistant, open **Settings → Add-ons → Piper → Open Web UI** and upload the `.onnx` and `.onnx.json` files from the zip, or copy them to `/share/piper`.
 5. Restart the Piper add-on if the voice doesn't appear.

@@ -144,6 +144,8 @@
 .group-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .group-head .hint { flex: 1; min-width: 8rem; }
 .group-title { margin-top: 0.3rem; }
+.speed-row { display: flex; flex-direction: column; gap: 0.25rem; }
+.speed-row input[type=range] { width: 100%; }
 .people-tools { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .people-tools input[type=search] { flex: 1; min-width: 10rem; padding: 0.4rem 0.6rem; }
 .maybe-same { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; font-size: 0.8rem; color: #fcd34d;

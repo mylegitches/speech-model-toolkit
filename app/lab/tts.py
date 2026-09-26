@@ -83,13 +83,21 @@ async def model_path(voice_id: str) -> Path:
     return workspace.exports_dir / exports[0]["dir"] / exports[0]["model"]
 
 
-async def synthesize(voice_id: str, text: str) -> bytes:
-    """WAV bytes of text spoken by the chosen voice."""
+def clamp_speed(speed: Any) -> int:
+    try:
+        return min(150, max(50, int(speed)))
+    except (TypeError, ValueError):
+        return 100
+
+
+async def synthesize(voice_id: str, text: str, speed: int = 100) -> bytes:
+    """WAV bytes of text spoken by the chosen voice, at speed % of its normal pace."""
     try:
         path = await model_path(voice_id)
     except OSError as err:
         raise RuntimeError(f"Could not download the default voice ({err}). Check the server's internet connection.") from err
     try:
-        return await voice_app.trainer.synthesize(path, text)
+        speed = clamp_speed(speed)
+        return await voice_app.trainer.synthesize(path, text, round(100 / speed, 3) if speed != 100 else None)
     except RuntimeError as err:
         raise RuntimeError(f"Piper could not speak with {path.name}: {str(err).strip().splitlines()[-1] if str(err).strip() else 'unknown error'}") from err

@@ -5,6 +5,7 @@ Client → server
          {"type": "playback_done"}   the reply finished playing: listen again
          {"type": "reset"}           forget the conversation so far
          {"type": "voice", "voice": id}   switch the reply voice
+         {"type": "speed", "speed": 90}   reply speed in % (start may carry it too)
          {"type": "ask", "text": "..."}   a typed question (while listening)
   binary 16 kHz mono s16le PCM from the microphone
 
@@ -93,6 +94,7 @@ class LabSession:
         self.ws = websocket
         self.state = "idle"
         self.voice = tts.DEFAULT_VOICE
+        self.speed = 100
         self.wakeword = ""
         self.detector: Any = None
         self.history: List[Dict[str, str]] = []
@@ -155,6 +157,7 @@ class LabSession:
     async def start(self, start: Dict[str, Any]) -> None:
         self.wakeword = str(start.get("wakeword") or "")
         self.voice = str(start.get("voice") or tts.DEFAULT_VOICE)
+        self.speed = tts.clamp_speed(start.get("speed", 100))
         onnx_path = ww.find_model(self.wakeword)
         if onnx_path is None:
             raise ValueError(f"Wake word model '{self.wakeword}' not found. Was it deleted? Reload the page.")
@@ -183,6 +186,10 @@ class LabSession:
             self.history.clear()
         elif kind == "voice":
             self.voice = str(message.get("voice") or tts.DEFAULT_VOICE)
+            if "speed" in message:
+                self.speed = tts.clamp_speed(message["speed"])
+        elif kind == "speed":
+            self.speed = tts.clamp_speed(message.get("speed"))
         elif kind == "ask" and self.state == "listening":
             # Typed question during a session: shares this conversation's history
             question = str(message.get("text") or "").strip()[:2000]
@@ -304,7 +311,7 @@ class LabSession:
     async def speak(self, text: str) -> None:
         await self.set_state("speaking", "Speaking…")
         try:
-            wav = await tts.synthesize(self.voice, text)
+            wav = await tts.synthesize(self.voice, text, self.speed)
         except Exception as err:
             _LOGGER.exception("Speech synthesis failed")
             await self.send(type="reply", text=text, audioUrl=None)

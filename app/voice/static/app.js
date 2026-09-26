@@ -72,7 +72,7 @@ async function selectVoice(name) {
 
   $('#voice-summary').textContent =
     `${voice.languageName} · ${voice.gender} · phonemes: ${voice.espeak_voice} · model: ${voice.modelName}.onnx`;
-  $('#howto-name').textContent = voice.modelName;
+  loadSpeed();
   $('#speak-input').value = TEST_SENTENCES[voice.language.split('-')[0]] || '';
 
   skip = 0;
@@ -1869,16 +1869,51 @@ function renderExports(s) {
   }
 }
 
+function speed() {
+  return Number($('#speed').value) || 100;
+}
+
+/** The model's file name at the chosen speed: en_US-tony_speed90-medium */
+function speedName() {
+  return speed() === 100 ? voice.modelName : voice.modelName.replace(/-medium$/, `_speed${speed()}-medium`);
+}
+
+function loadSpeed() {
+  let saved = 100;
+  try { saved = Number(localStorage.getItem(`speed:${voice.name}`)) || 100; } catch (e) { /* ignore */ }
+  $('#speed').value = saved;
+  showSpeed();
+}
+
+function showSpeed() {
+  const s = speed();
+  const scale = Math.round((100 / s) * 1000) / 1000;
+  $('#speed-value').textContent = `${s}%`;
+  $('#speed-hint').textContent = s === 100
+    ? 'As trained. Slide left to slow it down; 🔊 Speak plays it at this speed.'
+    : `${s < 100 ? 'Slower' : 'Faster'} than trained (Piper length_scale ${scale}). Downloads are named ${speedName()} and speak at this speed.`;
+  $('#howto-name').textContent = speedName();
+  $('#howto-scale').textContent = String(scale);
+  show($('#howto-speed'), s !== 100);
+  updateDownloads();
+}
+
+$('#speed').addEventListener('input', () => {
+  try { localStorage.setItem(`speed:${voice.name}`, String(speed())); } catch (e) { /* ignore */ }
+  showSpeed();
+});
+
 function updateDownloads() {
   const dir = $('#export-select').value;
-  const entry = (status.exports || []).find((e) => e.dir === dir);
+  const entry = (status?.exports || []).find((e) => e.dir === dir);
   if (!entry) {
     return;
   }
   const base = voiceUrl(`/exports/${dir}`);
-  $('#dl-zip').href = `${base}/home-assistant.zip`;
-  $('#dl-onnx').href = `${base}/${entry.model}`;
-  $('#dl-json').href = `${base}/${entry.model}.json`;
+  const query = speed() === 100 ? '' : `?speed=${speed()}`;
+  $('#dl-zip').href = `${base}/home-assistant.zip${query}`;
+  $('#dl-onnx').href = `${base}/${entry.model}${query}`;
+  $('#dl-json').href = `${base}/${entry.model}.json${query}`;
 }
 
 $('#export-select').addEventListener('change', updateDownloads);
@@ -1899,6 +1934,7 @@ $('#speak-btn').addEventListener('click', async () => {
     const wav = await postJson(voiceUrl('/speak'), {
       text: $('#speak-input').value,
       export: $('#export-select').value,
+      speed: speed(),
     });
     const audio = $('#speak-audio');
     audio.src = URL.createObjectURL(wav);
@@ -2000,4 +2036,9 @@ document.querySelector('.log-details').addEventListener('toggle', (e) => {
   if (e.target.open) {
     $('#log-panel').scrollTop = $('#log-panel').scrollHeight;
   }
+});
+
+// The Test Lab tab changed this voice's speed: follow it
+window.addEventListener('storage', (e) => {
+  if (voice && e.key === `speed:${voice.name}`) loadSpeed();
 });

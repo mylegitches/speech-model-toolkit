@@ -59,6 +59,7 @@ async def api_session(websocket: WebSocket) -> None:
 class AskRequest(BaseModel):
     text: str
     voice: str = tts.DEFAULT_VOICE
+    speed: int = 100
     history: list = []
 
 
@@ -83,7 +84,7 @@ async def api_ask(request: AskRequest) -> Dict[str, Any]:
         reply = session.AI_FAILED
 
     try:
-        wav = await tts.synthesize(request.voice, reply)
+        wav = await tts.synthesize(request.voice, reply, request.speed)
         audio_url = f"api/audio/{session.store_audio(wav)}.wav"
     except Exception as err:
         _LOGGER.exception("Test Lab: speaking the reply with %s failed", request.voice)

@@ -26,6 +26,10 @@
         <label>Reply voice
           <select id="voice-select"></select>
         </label>
+        <label>Speed <span class="value" id="speed-value">100%</span>
+          <input id="speed" type="range" min="60" max="130" step="5" value="100" />
+          <span class="hint">Remembered per voice, same as the Voice tab's Test &amp; install.</span>
+        </label>
       </div>
       <div id="no-wakeword" class="banner banner--warning hidden">
         No wake word trained yet. Train one in the <a href="../#wakeword" target="_top">Wake Word</a> tab first.

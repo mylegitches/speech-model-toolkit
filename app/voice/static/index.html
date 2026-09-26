@@ -243,6 +243,10 @@
           <input id="speak-input" class="grow" maxlength="500" />
           <button id="speak-btn" class="btn btn--primary">🔊 Speak</button>
         </div>
+        <label class="speed-row">Speed <span class="value" id="speed-value">100%</span>
+          <input id="speed" type="range" min="60" max="130" step="5" value="100" />
+          <span class="hint" id="speed-hint">As trained. Slide left to slow it down; 🔊 Speak plays it at this speed.</span>
+        </label>
         <audio id="speak-audio" controls class="hidden"></audio>
 
         <div class="row">
@@ -255,6 +259,7 @@
           <li>In Home Assistant open <strong>Settings → Add-ons → Piper → Open Web UI</strong> and upload the <code>.onnx</code> and <code>.onnx.json</code> files from the zip (or copy them to <code>/share/piper</code>).</li>
           <li>Restart the Piper add-on if the voice doesn't show up.</li>
           <li>Go to <strong>Settings → Voice assistants</strong>, edit your assistant and pick <strong id="howto-name"></strong> as the voice.</li>
+          <li id="howto-speed" class="hidden">The speed is saved in the <code>.onnx.json</code>. If the voice still sounds at normal speed, the Piper add-on's own <em>length_scale</em> option is overriding it: set that option to <strong id="howto-scale"></strong> (it applies to all its voices).</li>
         </ol>
       </div>
 
