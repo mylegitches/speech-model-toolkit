@@ -8,6 +8,7 @@ Plain HTTP (httpx), no vendor SDKs. Four API styles cover every provider:
   ollama     Ollama, local or Ollama Cloud
 """
 
+import asyncio
 import logging
 import time
 from dataclasses import asdict, dataclass
@@ -17,6 +18,7 @@ import httpx
 
 TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 SEARCH_TIMEOUT = httpx.Timeout(180.0, connect=10.0)  # web searches take a while
+RETRY_PAUSES = [2, 6]  # seconds before retrying a failed or dropped connection
 
 # Anthropic server-side web search: the dynamic-filtering variant for current
 # models, the basic one for older models (tried if the first is rejected)
@@ -175,10 +177,24 @@ async def _request(
     body: Optional[Dict[str, Any]] = None,
     params: Optional[Dict[str, Any]] = None,
 ) -> Any:
+    host = url.split("/", 3)[2]
     try:
-        response = await client.request(method, url, headers=headers, json=body, params=params)
+        for attempt, pause in enumerate(RETRY_PAUSES + [None]):
+            try:
+                response = await client.request(method, url, headers=headers, json=body, params=params)
+                break
+            except (httpx.ConnectError, httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError) as err:
+                # A flaky network: try again a couple of times before giving up
+                if pause is None:
+                    raise
+                _LOGGER.info("Connection to %s failed (%s); retrying in %ds", host, type(err).__name__, pause)
+                await asyncio.sleep(pause)
     except httpx.ConnectError as err:
-        raise ProviderError(f"Can't reach {url.split('/', 3)[2]}. Check the base URL and that the server is running.") from err
+        raise ProviderError(f"Can't reach {host} (tried {len(RETRY_PAUSES) + 1} times). "
+                            "Check the base URL, that the server is running, and this server's internet connection.") from err
+    except (httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError) as err:
+        raise ProviderError(f"The connection to {host} kept dropping (tried {len(RETRY_PAUSES) + 1} times). "
+                            "Check this server's internet connection.") from err
     except httpx.TimeoutException as err:
         raise ProviderError("The provider took too long to answer") from err
     except httpx.HTTPError as err:

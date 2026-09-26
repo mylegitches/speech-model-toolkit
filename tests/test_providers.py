@@ -216,3 +216,31 @@ def test_out_of_tokens_is_explained():
     with pytest.raises(providers.EmptyAnswer) as err:
         run(providers.chat(conn, [{"role": "user", "content": "hi"}], max_tokens=500, client=client))
     assert err.value.out_of_tokens and "500 tokens" in str(err.value)
+
+
+def test_dropped_connections_are_retried(monkeypatch):
+    monkeypatch.setattr(providers, "RETRY_PAUSES", [0, 0])
+    calls = []
+
+    def transport(request):
+        calls.append(request)
+        if len(calls) < 3:
+            raise httpx.ConnectError("network is unreachable", request=request)
+        return httpx.Response(200, json={"message": {"content": "OK"}})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    conn = {"provider": "ollama-cloud", "apiKey": "k", "model": "m"}
+    assert run(providers.chat(conn, [{"role": "user", "content": "hi"}], client=client)) == "OK"
+    assert len(calls) == 3
+
+
+def test_unreachable_after_retries(monkeypatch):
+    monkeypatch.setattr(providers, "RETRY_PAUSES", [0])
+
+    def transport(request):
+        raise httpx.ConnectError("no route", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    with pytest.raises(providers.ProviderError, match="tried 2 times"):
+        run(providers.chat({"provider": "ollama-cloud", "apiKey": "k", "model": "m"},
+                           [{"role": "user", "content": "hi"}], client=client))
