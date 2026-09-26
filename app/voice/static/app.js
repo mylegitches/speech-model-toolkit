@@ -910,7 +910,8 @@ function identifyBar() {
       el('a', { href: '../#settings', target: '_top', textContent: info.connected ? 'turn on Speaker identification in Settings' : 'add an AI connection and turn on Speaker identification in Settings' })));
     return bar;
   }
-  const running = info.running || people.ai?.state === 'running';
+  // Only the server knows if a run is going (a saved "running" is left over from a restart)
+  const running = Boolean(info.running);
   const go = el('button', {
     type: 'button', className: 'btn btn--secondary', disabled: running,
     textContent: running ? 'Identifying…' : '🔎 Identify with AI',
@@ -932,6 +933,7 @@ function identifyBar() {
   let text = bits.join(' · ');
   if (running) text = `Asking the AI${ai.detail ? ` (${ai.detail})` : ''}… ${text}`;
   else if (ai.state === 'error') text = `Last try failed: ${ai.error}`;
+  else if (ai.state === 'running') text = 'The last run was interrupted (restart). Press Identify to run it again.';
   else if (ai.at) text = `${text}${text ? ' · ' : ''}last run ${new Date(ai.at * 1000).toLocaleTimeString()}`;
   bar.append(el('span', { className: `hint${ai.state === 'error' && !running ? ' bad' : ''}`, textContent: text }));
   return bar;
