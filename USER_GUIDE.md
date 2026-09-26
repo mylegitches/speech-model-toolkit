@@ -118,6 +118,7 @@ Use recordings you already have: voice memos, podcasts, interviews, movies or a 
 Every file is compared with the people found in your earlier files, so the same person keeps the same name everywhere: their card in each file says *also in N other files*. Above the takes, **People in your files** lists everyone found so far:
 
 - **Click a name** to rename that person (e.g. "Jerry"), in the panel or on a speaker card in a file; Enter saves, Esc cancels. The name then shows in every file. Giving two people the same name offers to merge them.
+- **Cards of the same character are grouped**: cards with the same name, or that the AI named the same character, sit together under one heading (e.g. *Tony Soprano · 4 cards · 1:12:40 of speech*). They're often one person split by shouting, whispering or a cold. Listen, then **Merge all** or merge only some; nothing is merged without you.
 - **This is the voice** marks the person you want. They're preselected in every file already imported and every file you import later.
 - **Maybe the same as …** appears when two entries sound alike (one person split in two, e.g. shouting vs. calm). ▶ to compare, then **Merge** or **Not the same** (the suggestion goes away for good).
 - **Tick two or more cards** and **Merge selected** to combine them (they go into the one with the most speech), or use **Same as…** on a card.

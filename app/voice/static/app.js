@@ -939,6 +939,44 @@ function identifyBar() {
   return bar;
 }
 
+/** Who a card is: your name for it, else the AI's answer (medium or high confidence). */
+function characterOf(person) {
+  if (!/^Person \d+$/.test(person.name.trim())) return person.name.trim().toLowerCase().replace(/\s+/g, ' ');
+  const ai = person.ai || {};
+  const name = (ai.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!name || ['mixed', 'unknown'].includes(name) || !['high', 'medium'].includes(ai.confidence)) return '';
+  return name;
+}
+
+function sum(group) {
+  return group.reduce((total, p) => total + p.seconds, 0);
+}
+
+function characterGroup(group) {
+  const named = group.find((p) => !/^Person \d+$/.test(p.name.trim()));
+  const title = named ? named.name : group[0].ai.name;
+  const section = el('section', { className: 'character-group' });
+  const head = el('div', { className: 'group-head' },
+    el('strong', { textContent: title }),
+    el('span', { className: 'hint', textContent: `${group.length} cards · ${clock(sum(group))} of speech` }));
+  const into = [...group].sort((a, b) => (b.id === people.target) - (a.id === people.target) || b.seconds - a.seconds)[0];
+  const mergeAll = el('button', {
+    type: 'button', className: 'btn btn--secondary', textContent: `Merge all ${group.length}`,
+    title: `One card for ${title}. Listen first: shouting or whispering may be worth keeping apart.`,
+  });
+  mergeAll.addEventListener('click', () => {
+    if (confirm(`Merge all ${group.length} “${title}” cards into one? They'll be one person in every file.`)) {
+      mergePeople(group.map((p) => p.id), into.id);
+    }
+  });
+  head.append(mergeAll);
+  section.append(head);
+  const grid = el('div', { className: 'people' });
+  group.forEach((person) => grid.append(personCard(person)));
+  section.append(grid);
+  return section;
+}
+
 function renderPeople() {
   const box = $('#people-panel');
   box.innerHTML = '';
@@ -993,15 +1031,33 @@ function renderPeople() {
   if (tools.childNodes.length) box.append(tools);
 
   const needle = peopleUi.filter.trim().toLowerCase();
-  const sorted = [...list]
-    .filter((p) => !needle || p.name.toLowerCase().includes(needle))
+  const all = [...list]
+    .filter((p) => !needle || p.name.toLowerCase().includes(needle)
+      || (p.ai?.name || '').toLowerCase().includes(needle))
     .sort((a, b) => (b.id === people.target) - (a.id === people.target)
       || peopleUi.selected.has(b.id) - peopleUi.selected.has(a.id)
       || b.seconds - a.seconds);
+
+  // Cards of the same character side by side (same name, or the same AI answer):
+  // often one person split by shouting, whispering or a cold. Merging stays your call.
+  const groups = new Map();
+  all.forEach((p) => {
+    const key = characterOf(p) || `#${p.id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  });
+  const split = [...groups.values()].filter((g) => g.length > 1)
+    .sort((a, b) => sum(b) - sum(a));
+  split.forEach((group) => box.append(characterGroup(group)));
+
+  const sorted = all.filter((p) => groups.get(characterOf(p) || `#${p.id}`).length === 1);
   const shown = needle || peopleUi.showAll ? sorted : sorted.slice(0, PEOPLE_SHOWN);
   const grid = el('div', { className: 'people' });
   shown.forEach((person) => grid.append(personCard(person)));
-  box.append(grid);
+  if (shown.length) {
+    if (split.length) box.append(el('strong', { className: 'group-title', textContent: 'Everyone else' }));
+    box.append(grid);
+  }
   if (shown.length < sorted.length) {
     const more = el('button', {
       type: 'button', className: 'btn btn--ghost',

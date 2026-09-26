@@ -140,6 +140,10 @@
 .name-input { flex: 1; min-width: 0; padding: 0.2rem 0.45rem; font-weight: 600; }
 .person .speaker-head input[type=checkbox] { accent-color: var(--accent-h); width: 1rem; height: 1rem; padding: 0; flex: none; }
 .person.ticked { border-color: var(--warning); }
+.character-group { border: 1px solid var(--accent-soft); border-radius: 10px; padding: 0.6rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.group-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.group-head .hint { flex: 1; min-width: 8rem; }
+.group-title { margin-top: 0.3rem; }
 .people-tools { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .people-tools input[type=search] { flex: 1; min-width: 10rem; padding: 0.4rem 0.6rem; }
 .maybe-same { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; font-size: 0.8rem; color: #fcd34d;
