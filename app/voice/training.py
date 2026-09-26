@@ -14,6 +14,7 @@ import shutil
 import signal
 import sys
 import time
+import zipfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -175,6 +176,18 @@ def download_resumable(url: str, tmp_path: Path, log: Callable[[str], None]) -> 
             time.sleep(5)
 
 
+_DOWNLOAD_LOCKS: Dict[str, "asyncio.Lock"] = {}
+
+
+def _checkpoint_ok(path: Path) -> bool:
+    """A PyTorch checkpoint is a zip archive; a cut-off or mixed-up download isn't a valid one."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            return bool(archive.namelist())
+    except (OSError, zipfile.BadZipFile):
+        return False
+
+
 # Multi-speaker datasets in the lists can't seed a single-speaker voice
 _MULTI_SPEAKER = re.compile(
     r"^(arctic|l2arctic|libritts|libritts_r|vctk|aru|semaine|mls(_.*)?|thorsten_emotional)$"
@@ -317,6 +330,13 @@ class Workspace:
     """Total lines ever logged (for incremental streaming)."""
 
     proc: Optional[asyncio.subprocess.Process] = None
+    task: Optional["asyncio.Task[None]"] = None
+    """The running _train task; it outlives state "running" while a stop winds down."""
+
+    @property
+    def active(self) -> bool:
+        """Running, or stopped but still shutting down."""
+        return self.running or (self.task is not None and not self.task.done())
 
     @property
     def work_dir(self) -> Path:
@@ -458,12 +478,14 @@ class TrainingManager:
 
     def busy_voice(self) -> Optional[str]:
         for name, workspace in self.workspaces.items():
-            if workspace.running:
+            if workspace.active:
                 return name
 
         return None
 
     def start(self, workspace: Workspace, settings: TrainingSettings) -> None:
+        if workspace.active and not workspace.running:
+            raise RuntimeError("The last training run is still stopping. Try again in a few seconds.")
         busy = self.busy_voice()
         if busy is not None:
             raise RuntimeError(f"Already training {busy}")
@@ -490,7 +512,7 @@ class TrainingManager:
             workspace.voice.name, settings.preset, settings.hours, settings.epochs or "no limit",
             settings.checkpoint[-60:] or "scratch", settings.accelerator, settings.batch_size or "auto",
         )
-        asyncio.create_task(self._train(workspace))
+        workspace.task = asyncio.create_task(self._train(workspace))
 
     async def stop(self, workspace: Workspace) -> None:
         if not workspace.running:
@@ -509,6 +531,13 @@ class TrainingManager:
                     os.killpg(proc.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
+        # Return once the run has really ended, so a new one can't overlap it
+        task = workspace.task
+        if task is not None and not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=60)
+            except asyncio.TimeoutError:
+                _LOGGER.warning("Training %s is taking long to stop", workspace.voice.name)
 
     def start_export(self, workspace: Workspace) -> None:
         if workspace.exporting:
@@ -887,8 +916,12 @@ class TrainingManager:
         parts = [urllib.parse.unquote(p) for p in url_path.split("/") if p]
         path = ws.voice.root.parent.parent / "checkpoints" / "_".join(parts[-3:])
         if path.is_file():
-            self._log(ws, f"Using cached base voice {path.name}")
-            return path
+            if _checkpoint_ok(path):
+                self._log(ws, f"Using cached base voice {path.name}")
+                return path
+            _LOGGER.warning("Saved base voice %s is damaged; downloading it again", path.name)
+            self._log(ws, f"The saved copy of {path.name} is damaged (an interrupted download); downloading it again")
+            path.unlink()
 
         self._log(ws, f"Downloading base voice {checkpoint}")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -899,8 +932,15 @@ class TrainingManager:
         def log(line: str) -> None:
             loop.call_soon_threadsafe(self._log, ws, line)
 
-        await asyncio.to_thread(download_resumable, checkpoint, tmp_path, log)
-        tmp_path.rename(path)
+        lock = _DOWNLOAD_LOCKS.setdefault(str(path), asyncio.Lock())
+        async with lock:  # one download per file, even if two voices want it
+            if path.is_file() and _checkpoint_ok(path):
+                return path
+            await asyncio.to_thread(download_resumable, checkpoint, tmp_path, log)
+            if not _checkpoint_ok(tmp_path):
+                tmp_path.unlink(missing_ok=True)
+                raise RuntimeError("The downloaded base voice is damaged (the connection dropped?). Start training again to download it once more.")
+            tmp_path.rename(path)
         self._log(ws, f"Saved base voice to {path}")
         return path
 

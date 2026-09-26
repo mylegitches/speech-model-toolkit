@@ -75,7 +75,14 @@ def load_embedder(cache_dir: Path) -> Callable[[np.ndarray], np.ndarray]:
 
 def voice_embedding(paths: List[str], embed: Callable[[np.ndarray], np.ndarray]) -> Optional[np.ndarray]:
     """Mean embedding of a voice's recordings (None if none could be read)."""
-    vectors = [embed(audio) for audio in (decode(p) for p in paths) if audio is not None]
+    return _mean(recording_embeddings(paths, embed))
+
+
+def recording_embeddings(paths: List[str], embed: Callable[[np.ndarray], np.ndarray]) -> List[np.ndarray]:
+    return [embed(audio) for audio in (decode(p) for p in paths) if audio is not None]
+
+
+def _mean(vectors: List[np.ndarray]) -> Optional[np.ndarray]:
     if not vectors:
         return None
     log(f"Analysed {len(vectors)} recordings")
@@ -90,7 +97,8 @@ def main() -> None:
     embed = load_embedder(cache_dir)
 
     # Your voice
-    mine = voice_embedding(request["recordings"], embed)
+    vectors = recording_embeddings(request["recordings"], embed)
+    mine = _mean(vectors)
     if mine is None:
         raise SystemExit("None of the recordings could be read")
 
