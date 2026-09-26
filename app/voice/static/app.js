@@ -1890,7 +1890,7 @@ function showSpeed() {
   const scale = Math.round((100 / s) * 1000) / 1000;
   $('#speed-value').textContent = `${s}%`;
   $('#speed-hint').textContent = s === 100
-    ? 'As trained. Slide left to slow it down; 🔊 Speak plays it at this speed.'
+    ? 'As trained. Slide left to slow it down; letting go of the slider speaks the text again at the new speed.'
     : `${s < 100 ? 'Slower' : 'Faster'} than trained (Piper length_scale ${scale}). Downloads are named ${speedName()} and speak at this speed.`;
   $('#howto-name').textContent = speedName();
   $('#howto-scale').textContent = String(scale);
@@ -1901,6 +1901,14 @@ function showSpeed() {
 $('#speed').addEventListener('input', () => {
   try { localStorage.setItem(`speed:${voice.name}`, String(speed())); } catch (e) { /* ignore */ }
   showSpeed();
+});
+// On release, speak again at the new speed (the player only replays the last clip)
+$('#speed').addEventListener('change', () => {
+  const audio = $('#speak-audio');
+  if (!audio.classList.contains('hidden') && $('#speak-input').value.trim() && !$('#speak-btn').disabled) {
+    audio.pause();
+    $('#speak-btn').click();
+  }
 });
 
 function updateDownloads() {

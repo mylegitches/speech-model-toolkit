@@ -537,6 +537,7 @@ async def api_speak(name: str, request: SpeakRequest) -> Response:
     if not text:
         raise ValueError("Type something to say")
 
+    _LOGGER.info("Speak with %s/%s at %d%% speed: %d characters", name, request.export, request.speed, len(text))
     try:
         wav = await trainer.speak(workspace, request.export, text,
                                   length_scale(request.speed) if request.speed != 100 else None)
