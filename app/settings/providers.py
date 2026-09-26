@@ -270,6 +270,7 @@ async def chat(
     max_tokens: int = 300,
     client: Optional[httpx.AsyncClient] = None,
     web_search: bool = False,
+    timeout: Optional[float] = None,
 ) -> str:
     """Send a conversation ([{role: user|assistant, content}]) and return the reply text.
 
@@ -286,7 +287,11 @@ async def chat(
     base = _base(conn, provider)
     headers = _headers(conn, provider)
     owned = client is None
-    client = client or httpx.AsyncClient(timeout=SEARCH_TIMEOUT if search else TIMEOUT)
+    if timeout:
+        limit = httpx.Timeout(max(timeout, SEARCH_TIMEOUT.read if search else 0), connect=10.0)
+    else:
+        limit = SEARCH_TIMEOUT if search else TIMEOUT
+    client = client or httpx.AsyncClient(timeout=limit)
     started = time.monotonic()
     try:
         try:

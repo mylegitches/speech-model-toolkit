@@ -194,3 +194,24 @@ def test_retries_with_more_tokens_when_the_model_ran_out(voice, monkeypatch):
     people = {p["id"]: p for p in asyncio.run(identify.identify(voice))["people"]}
     assert budgets == [min(identify.MAX_TOKENS, 3000 + 150 * 4), identify.RETRY_MAX_TOKENS]
     assert people["p1"]["ai"]["name"] == "Tony Soprano"
+
+
+def test_many_people_are_asked_in_groups(voice, monkeypatch):
+    monkeypatch.setattr(identify, "BATCH", 2)
+    prompts = []
+
+    async def fake_chat(conn, messages, **kwargs):
+        prompt = messages[0]["content"]
+        prompts.append(prompt)
+        asked = [pid for pid in ("p1", "p2", "p3", "p4") if f"\n{pid} (" in prompt]
+        return json.dumps({"people": [{"id": pid, "name": "Tony Soprano" if pid == "p1" else "Paulie",
+                                       "confidence": "medium"} for pid in asked]})
+
+    async def no_cast(*args):
+        return "", []
+
+    monkeypatch.setattr(identify, "cast_lookup", no_cast)
+    monkeypatch.setattr(identify.providers, "chat", fake_chat)
+    result = asyncio.run(identify.identify(voice))
+    assert len(prompts) == 2 and result["ai"]["identified"] == 4
+    assert "p1 = Tony Soprano (AI, medium)" in prompts[1]  # earlier answers carried over

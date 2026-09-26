@@ -33,7 +33,9 @@ from .voices import Voice
 
 _LOGGER = logging.getLogger(__name__)
 
-MAX_PEOPLE = 60          # per request, those with the most speech first
+MAX_PEOPLE = 600         # per run, those with the most speech first
+BATCH = 25               # people per AI request
+REQUEST_TIMEOUT = 300    # seconds; writing answers for a whole group takes a while
 LINES_PER_PERSON = 8
 MAX_TOKENS = 8000        # reply budget (reasoning + search + the JSON); most models allow 8k
 RETRY_MAX_TOKENS = 16000  # once more with this when the model ran out before answering
@@ -208,7 +210,8 @@ def _prompt(people: List[Dict[str, Any]], named: List[Dict[str, Any]], files: Li
         parts.append(f"Cast of {show} (from TVmaze, character (actor); found from the file names or metadata, "
                      "so ignore it if it clearly doesn't fit the dialogue):\n" + "; ".join(cast))
     if named:
-        parts.append("Already named by the user, trust these:\n" + "\n".join(
+        parts.append("Already named (by the user: trust these; marked AI: earlier answers, "
+                     "use the same name for the same character):\n" + "\n".join(
             f'- {p["id"]} = {p["name"]}' for p in named))
     blocks = []
     for p in people:
@@ -284,43 +287,80 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
     show, cast = "", []
     if options["castLookup"]:
         show, cast = await _safe_cast_lookup(files, tags, known_show)
-    named = [p for p in data["people"] if not _DEFAULT_NAME.match(p["name"])]
     searching = bool(options["webSearch"] and providers.web_search_support(conn))
 
-    async def ask(show: str, cast: List[str]) -> Tuple[Optional[str], List[Dict[str, Any]]]:
-        prompt = [{"role": "user", "content": _prompt(candidates, named, files, show, cast, tags, searching)}]
+    async def ask(batch: List[Dict[str, Any]], named: List[Dict[str, Any]], show: str,
+                  cast: List[str]) -> Tuple[Optional[str], List[Dict[str, Any]]]:
+        batch_files = list(dict.fromkeys(
+            line["file"] for p in batch for line in p.get("lines", []) if line.get("file")))
+        prompt = [{"role": "user", "content": _prompt(batch, named, batch_files, show, cast, tags, searching)}]
         # Room for reasoning models and web search results, not only the JSON
-        budget = min(MAX_TOKENS, 3000 + 150 * len(candidates))
+        budget = min(MAX_TOKENS, 3000 + 150 * len(batch))
         try:
-            reply = await providers.chat(conn, prompt, system=SYSTEM, temperature=0.2,
-                                         max_tokens=budget, web_search=options["webSearch"])
+            reply = await providers.chat(conn, prompt, system=SYSTEM, temperature=0.2, max_tokens=budget,
+                                         web_search=options["webSearch"], timeout=REQUEST_TIMEOUT)
         except providers.EmptyAnswer as err:
             if not err.out_of_tokens or budget >= RETRY_MAX_TOKENS:
                 raise
             _LOGGER.info("AI ran out of tokens (%d) before answering; retrying with %d", budget, RETRY_MAX_TOKENS)
-            _set_status(voice, state="running", detail="Retrying with more room to think…")
             try:
                 reply = await providers.chat(conn, prompt, system=SYSTEM, temperature=0.2,
-                                             max_tokens=RETRY_MAX_TOKENS, web_search=options["webSearch"])
+                                             max_tokens=RETRY_MAX_TOKENS, web_search=options["webSearch"],
+                                             timeout=REQUEST_TIMEOUT)
             except providers.ProviderError as retry_err:
                 if isinstance(retry_err, providers.EmptyAnswer):
                     raise
                 raise err from retry_err  # e.g. the model doesn't allow that many tokens
         return _parse_reply(reply)
 
-    _set_status(voice, state="running", error=None, cast=show or None)
-    started = time.monotonic()
-    recognised, answer_list = await ask(show, cast)
-    if recognised and not cast and options["castLookup"]:
-        # The AI recognised the show from the dialogue: get its cast and ask once more with it
-        show, cast = await _safe_cast_lookup([], {}, recognised)
-        if cast:
-            _set_status(voice, state="running", cast=show)
-            _LOGGER.info("AI recognised %s from the dialogue; asking again with its cast", show)
-            again, answer_list = await ask(show, cast)
-            recognised = again or recognised
-    answers = {a["id"]: a for a in answer_list}
+    def known_names(batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Names so far (the user's, and the AI's from earlier groups), for consistent answers."""
+        people = speakers.load(voice)["people"]
+        asking = {p["id"] for p in batch}
+        named = [{"id": p["id"], "name": p["name"]} for p in people if not _DEFAULT_NAME.match(p["name"])]
+        named += [{"id": p["id"], "name": f'{p["ai"]["name"]} (AI, {p["ai"]["confidence"]})'}
+                  for p in people if _DEFAULT_NAME.match(p["name"]) and (p.get("ai") or {}).get("name")
+                  and p["id"] not in asking]
+        return named[:300]
 
+    batches = [candidates[i:i + BATCH] for i in range(0, len(candidates), BATCH)]
+    _set_status(voice, state="running", error=None, cast=show or None,
+                detail=f"group 1 of {len(batches)}" if len(batches) > 1 else None)
+    started = time.monotonic()
+    answered = renamed = 0
+    recognised = None
+    for n, batch in enumerate(batches):
+        if n:
+            _set_status(voice, state="running", detail=f"group {n + 1} of {len(batches)}")
+        named = known_names(batch)
+        found_show, answer_list = await ask(batch, named, show, cast)
+        recognised = recognised or found_show
+        if found_show and not cast and options["castLookup"]:
+            # The AI recognised the show from the dialogue: get its cast and ask again with it
+            show, cast = await _safe_cast_lookup([], {}, found_show)
+            if cast:
+                _set_status(voice, state="running", cast=show)
+                _LOGGER.info("AI recognised %s from the dialogue; asking again with its cast", show)
+                found_show, answer_list = await ask(batch, named, show, cast)
+        answers = {a["id"]: a for a in answer_list}
+        renamed += _store_answers(voice, answers, options)
+        answered += len(answers)
+
+    with speakers._lock:
+        data = speakers.load(voice)
+        data["ai"] = {"state": "done", "error": None, "at": time.time(), "cast": show or None,
+                      "identified": answered, "show": show or recognised or known_show, "detail": None}
+        speakers._save(voice, data)
+
+    merged = _auto_merge(voice) if options.get("autoMerge") else 0
+    _LOGGER.info("AI identification for %s: %d of %d people answered in %d group(s), %d renamed, %d merged, in %.0fs%s",
+                 voice.name, answered, len(candidates), len(batches), renamed, merged,
+                 time.monotonic() - started, f" (cast: {show})" if show else "")
+    return speakers.public(voice)
+
+
+def _store_answers(voice: Voice, answers: Dict[str, Dict[str, Any]], options: Dict[str, Any]) -> int:
+    """Save the AI's answers on the people (right away, so each group shows up); returns how many were renamed."""
     renamed = 0
     with speakers._lock:
         data = speakers.load(voice)
@@ -341,15 +381,8 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
                     and person["ai"]["confidence"] == "high" and _DEFAULT_NAME.match(person["name"])):
                 person["name"] = name[:40]
                 renamed += 1
-        data["ai"] = {"state": "done", "error": None, "at": time.time(), "cast": show or None,
-                      "identified": len(answers), "show": show or recognised or known_show}
         speakers._save(voice, data)
-
-    merged = _auto_merge(voice) if options.get("autoMerge") else 0
-    _LOGGER.info("AI identification for %s: %d of %d people answered, %d renamed, %d merged, in %.0fs%s",
-                 voice.name, len(answers), len(candidates), renamed, merged, time.monotonic() - started,
-                 f" (cast: {show})" if show else "")
-    return speakers.public(voice)
+    return renamed
 
 
 def backfill(voice: Voice) -> int:

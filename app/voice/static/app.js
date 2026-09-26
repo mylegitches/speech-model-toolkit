@@ -930,7 +930,7 @@ function identifyBar() {
   const bits = [info.provider && `with ${info.provider}`, info.webSearch && 'web search on',
     ai.cast && `cast: ${ai.cast}`].filter(Boolean);
   let text = bits.join(' · ');
-  if (running) text = `Asking the AI… ${text}`;
+  if (running) text = `Asking the AI${ai.detail ? ` (${ai.detail})` : ''}… ${text}`;
   else if (ai.state === 'error') text = `Last try failed: ${ai.error}`;
   else if (ai.at) text = `${text}${text ? ' · ' : ''}last run ${new Date(ai.at * 1000).toLocaleTimeString()}`;
   bar.append(el('span', { className: `hint${ai.state === 'error' && !running ? ' bad' : ''}`, textContent: text }));
