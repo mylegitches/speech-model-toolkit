@@ -244,3 +244,18 @@ def test_unreachable_after_retries(monkeypatch):
     with pytest.raises(providers.ProviderError, match="tried 2 times"):
         run(providers.chat({"provider": "ollama-cloud", "apiKey": "k", "model": "m"},
                            [{"role": "user", "content": "hi"}], client=client))
+
+
+def test_ollama_think_switch_and_fallback():
+    bodies = []
+
+    def handler(request):
+        bodies.append(body(request))
+        if "think" in bodies[-1]:
+            return 400, {"error": "model does not support thinking"}
+        return 200, {"message": {"content": "OK"}}
+
+    client, _ = mock_client(handler)
+    conn = {"provider": "ollama-cloud", "apiKey": "k", "model": "m"}
+    assert run(providers.chat(conn, [{"role": "user", "content": "hi"}], client=client, think=False)) == "OK"
+    assert bodies[0]["think"] is False and "think" not in bodies[1]

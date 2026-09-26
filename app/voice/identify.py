@@ -298,7 +298,7 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
         budget = min(MAX_TOKENS, 3000 + 150 * len(batch))
         try:
             reply = await providers.chat(conn, prompt, system=SYSTEM, temperature=0.2, max_tokens=budget,
-                                         web_search=options["webSearch"], timeout=REQUEST_TIMEOUT)
+                                         web_search=options["webSearch"], timeout=REQUEST_TIMEOUT, think=False)
         except providers.EmptyAnswer as err:
             if not err.out_of_tokens or budget >= RETRY_MAX_TOKENS:
                 raise
@@ -306,7 +306,7 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
             try:
                 reply = await providers.chat(conn, prompt, system=SYSTEM, temperature=0.2,
                                              max_tokens=RETRY_MAX_TOKENS, web_search=options["webSearch"],
-                                             timeout=REQUEST_TIMEOUT)
+                                             timeout=REQUEST_TIMEOUT, think=False)
             except providers.ProviderError as retry_err:
                 if isinstance(retry_err, providers.EmptyAnswer):
                     raise
