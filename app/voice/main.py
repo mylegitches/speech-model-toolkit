@@ -12,7 +12,7 @@ import zipfile
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from starlette.background import BackgroundTask
@@ -289,6 +289,16 @@ async def api_people(name: str) -> Dict[str, Any]:
 
 class IdentifyRequest(BaseModel):
     everyone: bool = False
+
+
+class FocusRequest(BaseModel):
+    ids: List[str]
+
+
+@app.post("/api/voices/{name}/speakers/focus")
+async def api_speakers_focus(name: str, request: FocusRequest) -> Dict[str, Any]:
+    """Show only these people and their possible matches ([] shows everyone)."""
+    return speakers.set_focus(store.get(name), request.ids)
 
 
 @app.post("/api/voices/{name}/speakers/identify")

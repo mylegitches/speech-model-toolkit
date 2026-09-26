@@ -96,3 +96,19 @@ def test_split_person_is_suggested_and_can_be_dismissed(voice):
     speakers.merge(voice, a2, bob, lambda *args: None)
     people = {p["id"]: p for p in speakers.public(voice)["people"]}
     assert all(s["id"] != bob for s in people[a1]["similar"])
+
+
+def test_focus_survives_merges(tmp_path):
+    from types import SimpleNamespace
+    from app.voice import speakers
+    import numpy as np
+    voice = SimpleNamespace(root=tmp_path, name="v")
+    vec = np.ones(192).tolist()
+    people = [{"id": f"p{i}", "name": f"Person {i}", "centroid": vec, "seconds": 10.0 * i, "takes": [], "sample": None}
+              for i in (1, 2, 3)]
+    speakers._save(voice, {"people": people, "target": None, "notSame": []})
+    assert speakers.set_focus(voice, ["p1", "p2"])["focus"] == ["p1", "p2"]
+    speakers.merge(voice, "p1", "p3", lambda *a: None)
+    assert speakers.public(voice)["focus"] == ["p3", "p2"]
+    with pytest.raises(KeyError):
+        speakers.set_focus(voice, ["p9"])

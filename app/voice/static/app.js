@@ -670,7 +670,7 @@ function setPeople(data) {
   people = { ...data, identify: data.identify || people.identify };
 }
 let lastTakes = [];
-const peopleUi = { showAll: false, filter: '', selected: new Set() };
+const peopleUi = { showAll: false, filter: '', selected: new Set(), showHidden: false };
 const PEOPLE_SHOWN = 12;  // more than this: the rest behind "Show all"
 
 const personById = (id) => people.people.find((p) => p.id === id);
@@ -835,7 +835,7 @@ function personCard(person) {
     textContent: isTarget ? '✓ The voice I want' : 'This is the voice',
   });
   pick.addEventListener('click', () => updatePerson(person, { target: !isTarget }));
-  actions.append(pick);
+  actions.append(pick, focusButton([person.id], '◎ Focus'));
   const others = people.people.filter((p) => p.id !== person.id);
   if (others.length) {
     const merge = el('select', { title: 'The same person was found twice? Merge them.' },
@@ -939,6 +939,51 @@ function identifyBar() {
   return bar;
 }
 
+/** Focus: the chosen cards, plus every card that may be the same character
+ *  (same name or AI answer, or a voice match / AI suggestion either way). */
+function focusVisible() {
+  const focus = (people.focus || []).map(personById).filter(Boolean);
+  if (!focus.length) return null;
+  const keep = new Set(focus.map((p) => p.id));
+  const characters = new Set(focus.map(characterOf).filter(Boolean));
+  people.people.forEach((p) => {
+    if (characters.has(characterOf(p))) keep.add(p.id);
+  });
+  people.people.forEach((p) => {
+    (p.similar || []).forEach((hint) => {
+      if (keep.has(p.id) && focus.some((f) => f.id === p.id)) keep.add(hint.id);
+      if (focus.some((f) => f.id === hint.id)) keep.add(p.id);
+    });
+  });
+  return keep;
+}
+
+async function setFocus(ids) {
+  try {
+    setPeople(await postJson(voiceUrl('/speakers/focus'), { ids }));
+  } catch (err) {
+    SMT.showError(err.message);
+    return;
+  }
+  peopleUi.showHidden = false;
+  renderPeople();
+}
+
+function focusButton(ids, label) {
+  const focused = new Set(people.focus || []);
+  const already = ids.every((id) => focused.has(id));
+  const btn = el('button', {
+    type: 'button', className: 'btn btn--ghost focus-btn',
+    textContent: already ? '◎ Unfocus' : label,
+    title: already ? 'Stop focusing on this' : 'Show only this character and cards that may be them; hide the rest',
+  });
+  btn.addEventListener('click', () => {
+    const next = already ? [...focused].filter((id) => !ids.includes(id)) : [...new Set([...focused, ...ids])];
+    setFocus(next);
+  });
+  return btn;
+}
+
 /** Who a card is: your name for it, else the AI's answer (medium or high confidence). */
 function characterOf(person) {
   if (!/^Person \d+$/.test(person.name.trim())) return person.name.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -969,7 +1014,7 @@ function characterGroup(group) {
       mergePeople(group.map((p) => p.id), into.id);
     }
   });
-  head.append(mergeAll);
+  head.append(mergeAll, focusButton(group.map((p) => p.id), `◎ Only ${title}`));
   section.append(head);
   const grid = el('div', { className: 'people' });
   group.forEach((person) => grid.append(personCard(person)));
@@ -1030,45 +1075,136 @@ function renderPeople() {
   }
   if (tools.childNodes.length) box.append(tools);
 
+  // Every character found so far (your names and the AI's): pick one to see only them
+  const characters = new Map();
+  list.forEach((p) => {
+    const key = characterOf(p);
+    if (!key) return;
+    if (!characters.has(key)) characters.set(key, []);
+    characters.get(key).push(p);
+  });
+  if (characters.size) {
+    const focusChars = new Set((people.focus || []).map(personById).filter(Boolean).map(characterOf));
+    const chips = el('div', { className: 'character-list' }, el('span', { className: 'hint', textContent: 'Characters:' }));
+    [...characters.entries()].sort((x, y) => sum(y[1]) - sum(x[1])).forEach(([key, cards]) => {
+      const named = cards.find((c) => !/^Person \d+$/.test(c.name.trim()));
+      const title = named ? named.name : cards[0].ai.name;
+      const chip = el('button', {
+        type: 'button', className: `chip${focusChars.has(key) ? ' chip--on' : ''}`,
+        textContent: `${title} · ${clock(sum(cards))}${cards.length > 1 ? ` · ${cards.length} cards` : ''}`,
+        title: focusChars.has(key) ? 'Show everyone again' : `Show only ${title} and possible matches`,
+      });
+      chip.addEventListener('click', () => setFocus(focusChars.has(key) ? [] : cards.map((c) => c.id)));
+      chips.append(chip);
+    });
+    box.append(chips);
+  }
+
+  // Focus: only chosen characters and their possible matches
+  const visible = focusVisible();
+  const hiddenPeople = visible ? list.filter((p) => !visible.has(p.id)) : [];
+  // The focused characters by name (a card's AI answer when you haven't named it)
+  const focusTitles = [...new Set((people.focus || []).map(personById).filter(Boolean)
+    .map((p) => (/^Person \d+$/.test(p.name.trim()) && p.ai?.name) || p.name))];
+  if (visible) {
+    const names = focusTitles;
+    const banner = el('div', { className: 'focus-banner' },
+      el('span', { textContent: `Showing only ${[...new Set(names)].join(', ')} and possible matches (${list.length - hiddenPeople.length} of ${list.length}).` }));
+    const toggle = el('button', {
+      type: 'button', className: 'btn btn--ghost',
+      textContent: peopleUi.showHidden ? 'Hide the others' : `Show hidden (${hiddenPeople.length})`,
+    });
+    toggle.addEventListener('click', () => { peopleUi.showHidden = !peopleUi.showHidden; renderPeople(); });
+    const clearFocus = el('button', { type: 'button', className: 'btn btn--secondary', textContent: 'Show everyone' });
+    clearFocus.addEventListener('click', () => setFocus([]));
+    banner.append(toggle, clearFocus);
+    box.append(banner);
+  }
+
   const needle = peopleUi.filter.trim().toLowerCase();
   const all = [...list]
+    .filter((p) => !visible || visible.has(p.id))
     .filter((p) => !needle || p.name.toLowerCase().includes(needle)
       || (p.ai?.name || '').toLowerCase().includes(needle))
     .sort((a, b) => (b.id === people.target) - (a.id === people.target)
       || peopleUi.selected.has(b.id) - peopleUi.selected.has(a.id)
       || b.seconds - a.seconds);
 
-  // Cards of the same character side by side (same name, or the same AI answer):
-  // often one person split by shouting, whispering or a cold. Merging stays your call.
-  const groups = new Map();
-  all.forEach((p) => {
-    const key = characterOf(p) || `#${p.id}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(p);
-  });
-  const split = [...groups.values()].filter((g) => g.length > 1)
-    .sort((a, b) => sum(b) - sum(a));
-  split.forEach((group) => box.append(characterGroup(group)));
-
-  const sorted = all.filter((p) => groups.get(characterOf(p) || `#${p.id}`).length === 1);
-  const shown = needle || peopleUi.showAll ? sorted : sorted.slice(0, PEOPLE_SHOWN);
-  const grid = el('div', { className: 'people' });
-  shown.forEach((person) => grid.append(personCard(person)));
-  if (shown.length) {
-    if (split.length) box.append(el('strong', { className: 'group-title', textContent: 'Everyone else' }));
-    box.append(grid);
-  }
-  if (shown.length < sorted.length) {
-    const more = el('button', {
-      type: 'button', className: 'btn btn--ghost',
-      textContent: `Show all ${sorted.length} people (${sorted.length - shown.length} more with less speech)`,
+  if (visible) {
+    // Chosen characters: confirmed cards first, then the ones that may be them
+    const focusIds = new Set(people.focus || []);
+    const focusChars = new Set((people.focus || []).map(personById).filter(Boolean).map(characterOf).filter(Boolean));
+    // Confirmed: named by you, or the AI is sure; a focused card with no name yet counts too
+    const isConfirmed = (p) => (focusChars.has(characterOf(p))
+      ? !/^Person \d+$/.test(p.name.trim()) || p.ai?.confidence === 'high'
+      : focusIds.has(p.id));
+    const confirmed = all.filter(isConfirmed);
+    const possible = all.filter((p) => !isConfirmed(p));
+    const section = (title, hint, cards, mergeable) => {
+      if (!cards.length) return;
+      const head = el('div', { className: 'group-head' },
+        el('strong', { textContent: title }),
+        el('span', { className: 'hint', textContent: hint }));
+      if (mergeable && cards.length > 1) {
+        const into = [...cards].sort((a, b) => (b.id === people.target) - (a.id === people.target) || b.seconds - a.seconds)[0];
+        const mergeAll = el('button', { type: 'button', className: 'btn btn--secondary', textContent: `Merge all ${cards.length}` });
+        mergeAll.addEventListener('click', () => {
+          if (confirm(`Merge the ${cards.length} confirmed cards into “${into.name}”? Listen first: shouting or whispering may be worth keeping apart.`)) {
+            mergePeople(cards.map((c) => c.id), into.id);
+          }
+        });
+        head.append(mergeAll);
+      }
+      const grid = el('div', { className: 'people' });
+      cards.forEach((person) => grid.append(personCard(person)));
+      box.append(el('section', { className: 'character-group' }, head, grid));
+    };
+    section(`Confirmed (${confirmed.length})`, `${clock(sum(confirmed))} of speech · named by you, or the AI is sure`, confirmed, true);
+    section(`Possible matches (${possible.length})`,
+      'The AI is less sure, or the voice sounds alike. ▶ to check, then Merge into a confirmed card or Not the same.', possible, false);
+  } else {
+    // Cards of the same character side by side (same name, or the same AI answer):
+    // often one person split by shouting, whispering or a cold. Merging stays your call.
+    const groups = new Map();
+    all.forEach((p) => {
+      const key = characterOf(p) || `#${p.id}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(p);
     });
-    more.addEventListener('click', () => { peopleUi.showAll = true; renderPeople(); });
-    box.append(more);
-  } else if (peopleUi.showAll && sorted.length > PEOPLE_SHOWN && !needle) {
-    const less = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Show fewer' });
-    less.addEventListener('click', () => { peopleUi.showAll = false; renderPeople(); });
-    box.append(less);
+    const split = [...groups.values()].filter((g) => g.length > 1)
+      .sort((a, b) => sum(b) - sum(a));
+    split.forEach((group) => box.append(characterGroup(group)));
+
+    const sorted = all.filter((p) => groups.get(characterOf(p) || `#${p.id}`).length === 1);
+    const shown = needle || peopleUi.showAll ? sorted : sorted.slice(0, PEOPLE_SHOWN);
+    const grid = el('div', { className: 'people' });
+    shown.forEach((person) => grid.append(personCard(person)));
+    if (shown.length) {
+      if (split.length) box.append(el('strong', { className: 'group-title', textContent: 'Everyone else' }));
+      box.append(grid);
+    }
+    if (shown.length < sorted.length) {
+      const more = el('button', {
+        type: 'button', className: 'btn btn--ghost',
+        textContent: `Show all ${sorted.length} people (${sorted.length - shown.length} more with less speech)`,
+      });
+      more.addEventListener('click', () => { peopleUi.showAll = true; renderPeople(); });
+      box.append(more);
+    } else if (peopleUi.showAll && sorted.length > PEOPLE_SHOWN && !needle) {
+      const less = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Show fewer' });
+      less.addEventListener('click', () => { peopleUi.showAll = false; renderPeople(); });
+      box.append(less);
+    }
+
+  }
+
+  if (visible && peopleUi.showHidden && hiddenPeople.length) {
+    box.append(el('strong', { className: 'group-title', textContent: `Hidden (${hiddenPeople.length}): not ${focusTitles.join(' or ')}, as far as names and voices tell` }));
+    const hiddenGrid = el('div', { className: 'people hidden-people' });
+    [...hiddenPeople].sort((a, b) => b.seconds - a.seconds)
+      .filter((p) => !needle || p.name.toLowerCase().includes(needle) || (p.ai?.name || '').toLowerCase().includes(needle))
+      .forEach((person) => hiddenGrid.append(personCard(person)));
+    box.append(hiddenGrid);
   }
 
   const target = personById(people.target);

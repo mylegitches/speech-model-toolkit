@@ -59,6 +59,7 @@ def load(voice: Voice) -> Dict[str, Any]:
     data.setdefault("people", [])
     data.setdefault("target", None)
     data.setdefault("notSame", [])
+    data.setdefault("focus", [])
     return data
 
 
@@ -108,11 +109,25 @@ def public(voice: Voice) -> Dict[str, Any]:
     return {
         "target": data["target"],
         "ai": data.get("ai"),
+        "focus": data["focus"],
         "people": [
             {**{k: v for k, v in p.items() if k != "centroid"}, "similar": similar.get(p["id"], [])}
             for p in data["people"]
         ],
     }
+
+
+def set_focus(voice: Voice, ids: List[str]) -> Dict[str, Any]:
+    """Only these people (and their possible matches) are shown; [] shows everyone."""
+    with _lock:
+        data = load(voice)
+        known = {p["id"] for p in data["people"]}
+        unknown = [i for i in ids if i not in known]
+        if unknown:
+            raise KeyError(f"No such person: {', '.join(unknown)}")
+        data["focus"] = list(dict.fromkeys(ids))
+        _save(voice, data)
+    return public(voice)
 
 
 def not_same(voice: Voice, person_id: str, other_id: str) -> Dict[str, Any]:
@@ -250,6 +265,7 @@ def merge(voice: Voice, person_id: str, into_id: str, retag: Any) -> Dict[str, A
         data["people"] = [p for p in data["people"] if p["id"] != person_id]
         if data["target"] == person_id:
             data["target"] = into_id
+        data["focus"] = list(dict.fromkeys(into_id if x == person_id else x for x in data["focus"]))
         # Pairs involving the merged person now apply to the one it went into
         pairs = {tuple(sorted(into_id if x == person_id else x for x in pair)) for pair in data["notSame"]}
         data["notSame"] = [list(p) for p in pairs if p[0] != p[1]]

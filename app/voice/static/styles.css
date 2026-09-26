@@ -146,6 +146,16 @@
 .group-title { margin-top: 0.3rem; }
 .speed-row { display: flex; flex-direction: column; gap: 0.25rem; }
 .speed-row input[type=range] { width: 100%; }
+.character-list { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.chip { border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 999px;
+  padding: 0.25rem 0.7rem; font-size: 0.8rem; cursor: pointer; }
+.chip:hover { border-color: var(--accent); }
+.chip--on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.focus-banner { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; background: var(--accent-soft);
+  border-radius: 8px; padding: 0.5rem 0.7rem; font-size: 0.9rem; }
+.focus-banner span { flex: 1; min-width: 12rem; }
+.hidden-people { opacity: 0.75; }
+.focus-btn { padding: 0.25rem 0.55rem; font-size: 0.8rem; }
 .people-tools { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .people-tools input[type=search] { flex: 1; min-width: 10rem; padding: 0.4rem 0.6rem; }
 .maybe-same { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; font-size: 0.8rem; color: #fcd34d;
