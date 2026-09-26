@@ -207,3 +207,12 @@ def test_sections_ignore_unknown_keys(settings_file):
     store.update({"audio": {"threshold": 0.7, "bogus": 1}})
     audio = store.load()["audio"]
     assert audio["threshold"] == 0.7 and "bogus" not in audio
+
+
+def test_out_of_tokens_is_explained():
+    reply = {"choices": [{"message": {"content": "", "reasoning": "hmm..."}, "finish_reason": "length"}]}
+    client, _ = mock_client(lambda r: (200, reply))
+    conn = {"provider": "openrouter", "apiKey": "k", "model": "some/thinker"}
+    with pytest.raises(providers.EmptyAnswer) as err:
+        run(providers.chat(conn, [{"role": "user", "content": "hi"}], max_tokens=500, client=client))
+    assert err.value.out_of_tokens and "500 tokens" in str(err.value)

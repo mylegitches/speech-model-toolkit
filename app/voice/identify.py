@@ -35,6 +35,8 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_PEOPLE = 60          # per request, those with the most speech first
 LINES_PER_PERSON = 8
+MAX_TOKENS = 8000        # reply budget (reasoning + search + the JSON); most models allow 8k
+RETRY_MAX_TOKENS = 16000  # once more with this when the model ran out before answering
 AUTO_MERGE_MIN_VOICE = 0.25
 """Voice similarity two cards need before the AI's "same character" merges them."""
 
@@ -286,14 +288,24 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
     searching = bool(options["webSearch"] and providers.web_search_support(conn))
 
     async def ask(show: str, cast: List[str]) -> Tuple[Optional[str], List[Dict[str, Any]]]:
-        reply = await providers.chat(
-            conn,
-            [{"role": "user", "content": _prompt(candidates, named, files, show, cast, tags, searching)}],
-            system=SYSTEM,
-            temperature=0.2,
-            max_tokens=min(8000, 400 + 120 * len(candidates)),
-            web_search=options["webSearch"],
-        )
+        prompt = [{"role": "user", "content": _prompt(candidates, named, files, show, cast, tags, searching)}]
+        # Room for reasoning models and web search results, not only the JSON
+        budget = min(MAX_TOKENS, 3000 + 150 * len(candidates))
+        try:
+            reply = await providers.chat(conn, prompt, system=SYSTEM, temperature=0.2,
+                                         max_tokens=budget, web_search=options["webSearch"])
+        except providers.EmptyAnswer as err:
+            if not err.out_of_tokens or budget >= RETRY_MAX_TOKENS:
+                raise
+            _LOGGER.info("AI ran out of tokens (%d) before answering; retrying with %d", budget, RETRY_MAX_TOKENS)
+            _set_status(voice, state="running", detail="Retrying with more room to think…")
+            try:
+                reply = await providers.chat(conn, prompt, system=SYSTEM, temperature=0.2,
+                                             max_tokens=RETRY_MAX_TOKENS, web_search=options["webSearch"])
+            except providers.ProviderError as retry_err:
+                if isinstance(retry_err, providers.EmptyAnswer):
+                    raise
+                raise err from retry_err  # e.g. the model doesn't allow that many tokens
         return _parse_reply(reply)
 
     _set_status(voice, state="running", error=None, cast=show or None)

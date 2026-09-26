@@ -175,3 +175,22 @@ def test_backfill_lines_from_takes_waiting_for_review(voice):
     lines = {p["id"]: p for p in speakers.load(voice)["people"]}["p3"]["lines"]
     assert lines[-1] == {"text": "Where's Meadow tonight?", "file": "Season 01/S01E09.mkv", "at": 61.0}
     assert identify.backfill(voice) == 0  # once per voice
+
+
+def test_retries_with_more_tokens_when_the_model_ran_out(voice, monkeypatch):
+    budgets = []
+
+    async def fake_chat(conn, messages, **kwargs):
+        budgets.append(kwargs["max_tokens"])
+        if len(budgets) == 1:
+            raise providers.EmptyAnswer("ran out", out_of_tokens=True)
+        return '{"people": [{"id": "p1", "name": "Tony Soprano", "confidence": "medium"}]}'
+
+    async def no_cast(*args):
+        return "", []
+
+    monkeypatch.setattr(identify, "cast_lookup", no_cast)
+    monkeypatch.setattr(identify.providers, "chat", fake_chat)
+    people = {p["id"]: p for p in asyncio.run(identify.identify(voice))["people"]}
+    assert budgets == [min(identify.MAX_TOKENS, 3000 + 150 * 4), identify.RETRY_MAX_TOKENS]
+    assert people["p1"]["ai"]["name"] == "Tony Soprano"

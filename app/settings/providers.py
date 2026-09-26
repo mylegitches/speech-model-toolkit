@@ -11,7 +11,7 @@ Plain HTTP (httpx), no vendor SDKs. Four API styles cover every provider:
 import logging
 import time
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -83,6 +83,15 @@ _BY_ID = {p.id: p for p in PROVIDERS}
 
 class ProviderError(Exception):
     """A short, user-facing error message."""
+
+
+class EmptyAnswer(ProviderError):
+    """The model answered with no text; out_of_tokens when it hit the output limit
+    (typically a reasoning model that spent the whole budget thinking)."""
+
+    def __init__(self, message: str, out_of_tokens: bool = False) -> None:
+        super().__init__(message)
+        self.out_of_tokens = out_of_tokens
 
 
 def web_search_support(conn: Optional[Dict[str, Any]]) -> str:
@@ -294,7 +303,7 @@ async def _chat(
     search: bool = False,
 ) -> str:
     if provider.api == "anthropic":
-        text = await _anthropic_chat(client, base, headers, model, messages, system, temperature, max_tokens, search)
+        text, finish = await _anthropic_chat(client, base, headers, model, messages, system, temperature, max_tokens, search)
 
     elif provider.api == "gemini":
         # Thinking models spend part of the output budget on reasoning
@@ -319,6 +328,7 @@ async def _chat(
             raise ProviderError(f"Gemini returned no answer ({reason})")
         parts = (candidates[0].get("content") or {}).get("parts") or []
         text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+        finish = candidates[0].get("finishReason") or ""
 
     elif provider.api == "ollama":
         options: Dict[str, Any] = {"num_predict": max_tokens}
@@ -332,6 +342,7 @@ async def _chat(
         }
         data = await _request(client, "POST", f"{base}/api/chat", headers, body)
         text = (data.get("message") or {}).get("content", "")
+        finish = data.get("done_reason") or ""
 
     else:
         body = {
@@ -352,13 +363,22 @@ async def _chat(
         if not choices:
             raise ProviderError("The provider returned no answer")
         content = (choices[0].get("message") or {}).get("content") or ""
+        finish = choices[0].get("finish_reason") or ""
         if isinstance(content, list):
             content = "".join(c.get("text", "") for c in content if isinstance(c, dict))
         text = content
 
     text = text.strip()
     if not text:
-        raise ProviderError("The model returned an empty answer. Try a higher max tokens or another model.")
+        if str(finish).lower() in ("length", "max_tokens", "max_output_tokens"):
+            raise EmptyAnswer(
+                f"The model used its whole reply budget ({max_tokens} tokens) before answering, probably "
+                "thinking or searching. Try a higher max tokens or a model without long reasoning.",
+                out_of_tokens=True,
+            )
+        raise EmptyAnswer("The model returned an empty answer"
+                          + (f" (it stopped with \"{finish}\")" if finish else "")
+                          + ". Try again, or another model.")
     return text
 
 
@@ -372,8 +392,8 @@ async def _anthropic_chat(
     temperature: Optional[float],
     max_tokens: int,
     search: bool,
-) -> str:
-    """Messages API call; with search, the server-side web search tool.
+) -> Tuple[str, str]:
+    """Messages API call; with search, the server-side web search tool. Returns (text, stop reason).
 
     Search results come back as extra content blocks (server_tool_use,
     web_search_tool_result) between the text blocks; only the text is the
@@ -403,7 +423,7 @@ async def _anthropic_chat(
         body["messages"] = list(messages) + [{"role": "assistant", "content": content}]
         data = await _request(client, "POST", f"{base}/v1/messages", headers, body)
         content += data.get("content", [])
-    return "".join(b.get("text", "") for b in content if b.get("type") == "text")
+    return "".join(b.get("text", "") for b in content if b.get("type") == "text"), data.get("stop_reason") or ""
 
 
 async def test(conn: Dict[str, Any]) -> Dict[str, Any]:
