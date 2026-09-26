@@ -259,7 +259,7 @@
           <li>In Home Assistant open <strong>Settings → Add-ons → Piper → Open Web UI</strong> and upload the <code>.onnx</code> and <code>.onnx.json</code> files from the zip (or copy them to <code>/share/piper</code>).</li>
           <li>Restart the Piper add-on if the voice doesn't show up.</li>
           <li>Go to <strong>Settings → Voice assistants</strong>, edit your assistant and pick <strong id="howto-name"></strong> as the voice.</li>
-          <li id="howto-speed" class="hidden">The speed is saved in the <code>.onnx.json</code>. If the voice still sounds at normal speed, the Piper add-on's own <em>length_scale</em> option is overriding it: set that option to <strong id="howto-scale"></strong> (it applies to all its voices).</li>
+          <li id="howto-speed" class="hidden">The speed is built into the model. Leave speed settings in Home Assistant or other apps at 1 (normal); anything else there changes it further.</li>
         </ol>
       </div>
 

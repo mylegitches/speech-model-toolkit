@@ -1887,13 +1887,11 @@ function loadSpeed() {
 
 function showSpeed() {
   const s = speed();
-  const scale = Math.round((100 / s) * 1000) / 1000;
   $('#speed-value').textContent = `${s}%`;
   $('#speed-hint').textContent = s === 100
     ? 'As trained. Slide left to slow it down; letting go of the slider speaks the text again at the new speed.'
-    : `${s < 100 ? 'Slower' : 'Faster'} than trained (Piper length_scale ${scale}). Downloads are named ${speedName()} and speak at this speed.`;
+    : `${s < 100 ? 'Slower' : 'Faster'} than trained. Downloads are named ${speedName()} and have this speed built into the model, so they sound the same in any app.`;
   $('#howto-name').textContent = speedName();
-  $('#howto-scale').textContent = String(scale);
   show($('#howto-speed'), s !== 100);
   updateDownloads();
 }

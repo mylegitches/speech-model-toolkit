@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from .. import errors
 from ..settings import store as settings_store
 from . import freeform, identify, matching, speakers
+from .speed import length_scale, speed_files, speed_stem
 from .training import (
     ACCELERATORS,
     AUTO_CHECKPOINT,
@@ -500,35 +501,6 @@ class SpeakRequest(BaseModel):
     """Speaking speed in % of the trained speed (Piper's length_scale = 100 / speed)."""
 
 
-def length_scale(speed: int) -> float:
-    if not 50 <= speed <= 150:
-        raise ValueError("Speed must be between 50% and 150%")
-    return round(100 / speed, 3)
-
-
-def speed_stem(voice: Voice, speed: int) -> str:
-    """Piper file name with the speed in it: en_US-tony_speed90-medium (Home Assistant's pattern)."""
-    if speed == 100:
-        return voice.model_stem
-    return f"{voice.language.replace('-', '_')}-{voice.name}_speed{speed}-medium"
-
-
-def speed_files(workspace: Any, export_dir: Path, speed: int) -> Dict[str, Any]:
-    """{download name: bytes or Path} for an export at a speed. The .onnx.json carries
-    the speed (inference.length_scale), so players use it without any setting."""
-    stem = speed_stem(workspace.voice, speed)
-    files: Dict[str, Any] = {}
-    for path in sorted(export_dir.glob("*.onnx*")):
-        if path.name.endswith(".onnx.json"):
-            config = json.loads(path.read_text(encoding="utf-8"))
-            if speed != 100:
-                config.setdefault("inference", {})["length_scale"] = length_scale(speed)
-            files[f"{stem}.onnx.json"] = json.dumps(config, indent=2, ensure_ascii=False).encode("utf-8")
-        elif path.suffix == ".onnx":
-            files[f"{stem}.onnx"] = path
-    return files
-
-
 @app.post("/api/voices/{name}/speak")
 async def api_speak(name: str, request: SpeakRequest) -> Response:
     workspace = workspace_for(name)
@@ -554,7 +526,8 @@ async def api_download_zip(name: str, export: str, speed: int = 100) -> Response
     length_scale(speed)  # validates
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        for arcname, content in speed_files(workspace, export_dir, speed).items():
+        files = await asyncio.to_thread(speed_files, workspace.voice, export_dir, speed)
+        for arcname, content in files.items():
             if isinstance(content, Path):
                 archive.write(content, arcname)
             else:
@@ -580,7 +553,7 @@ async def api_download_file(name: str, export: str, filename: str, speed: int = 
     length_scale(speed)  # validates
     suffix = ".onnx.json" if filename.endswith(".onnx.json") else ".onnx"
     download = f"{speed_stem(workspace.voice, speed)}{suffix}"
-    content = speed_files(workspace, path.parent, speed)[download]
+    content = (await asyncio.to_thread(speed_files, workspace.voice, path.parent, speed))[download]
     if isinstance(content, Path):
         return FileResponse(content, filename=download)
     return Response(content, media_type="application/json",
