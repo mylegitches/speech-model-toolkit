@@ -158,6 +158,7 @@
 .clip-with-reason small { padding-left: 4.2rem; }
 .voice-cards > summary { cursor: pointer; color: var(--muted); margin: 0.3rem 0; }
 .people-cards { display: flex; flex-direction: column; gap: 0.6rem; }
+.take--compact { padding-top: 0.5rem; padding-bottom: 0.5rem; }
 .focus-banner { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; background: var(--accent-soft);
   border-radius: 8px; padding: 0.5rem 0.7rem; font-size: 0.9rem; }
 .focus-banner span { flex: 1; min-width: 12rem; }

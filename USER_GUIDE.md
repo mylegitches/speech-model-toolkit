@@ -133,7 +133,7 @@ Every file is compared with the people found in your earlier files, so the same 
 3. **Pick a character** from the list at the top of the People panel (e.g. *Tony Soprano · 640 ✓ · 172 ?*).
 4. **Review their clips** across all files: **Confirmed** clips are ticked, **Possible** ones (the AI is less sure, or the voice doesn't match) are not, each with the reason. ▶ to listen, fix words, untick music, shouting, whispering or other voices, then **Save N ticked clips to the dataset**. The files stay, so you can come back for more (saved clips are marked).
 
-It runs after every imported file; **🔎 Identify with AI** does the files not done yet (Shift-click: all of them again). The voice cards behind the characters are under **Voice cards** for renaming and merging by hand.
+With it on, each file with several people shows as one line in the list (*Lines identified* once the AI has read it, or *Waiting for AI*); there's no per-file speaker picker, since clips are reviewed per character. It runs after every imported file; **🔎 Identify with AI** does the files not done yet (Shift-click: all of them again). The voice cards behind the characters are under **Voice cards** for renaming and merging by hand.
 
 Once the person you want is marked, review the clips of each file, then use **✓ Save *name*'s clips from all files** to add all of them to the dataset at once. Unticked clips stay out.
 

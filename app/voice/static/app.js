@@ -792,7 +792,7 @@ function selectTargetEverywhere() {
 
 function refreshTakeCards() {
   renderPeople();
-  Object.keys(renderedTakes).forEach((id) => { if (renderedTakes[id] === 'done') delete renderedTakes[id]; });
+  Object.keys(renderedTakes).forEach((id) => { if (renderedTakes[id].startsWith('done')) delete renderedTakes[id]; });
   loadTakes();
 }
 
@@ -1418,10 +1418,10 @@ async function loadTakes() {
   });
   takes.slice().reverse().forEach((take) => {
     const existing = box.querySelector(`.take[data-id="${take.id}"]`);
-    if (existing && renderedTakes[take.id] === take.state && take.state !== 'running') return;
+    if (existing && renderedTakes[take.id] === takeKey(take) && take.state !== 'running') return;
     const node = renderTake(take);
     if (existing) existing.replaceWith(node); else box.append(node);
-    renderedTakes[take.id] = take.state;
+    renderedTakes[take.id] = takeKey(take);
   });
   if (recordMode === 'prompts' && takes.some((t) => ['done', 'choose_track'].includes(t.state))) {
     // Something is waiting for review: show it where it came from
@@ -1435,8 +1435,16 @@ async function loadTakes() {
 // say so next to the counter and in the Train step.
 let pendingClips = 0;
 let pendingTakes = 0;
+/** Multi-speaker files are reviewed per character (AI identification is on). */
+function characterReview() {
+  return Boolean(people.identify?.enabled && people.identify?.connected);
+}
+
+const takeKey = (take) => `${take.state}${take.attributed ? ':ai' : ''}${take.speakers && characterReview() ? ':chars' : ''}`;
+
 function updatePending(takes) {
-  const waiting = takes.filter((t) => ['done', 'choose_track', 'running'].includes(t.state));
+  const waiting = takes.filter((t) => ['done', 'choose_track', 'running'].includes(t.state)
+    && !(t.state === 'done' && t.speakers && characterReview()));
   pendingTakes = waiting.length;
   pendingClips = waiting.reduce((sum, t) => sum + (t.state === 'done' ? t.segments.length : 0), 0);
   const what = pendingClips
@@ -1551,6 +1559,15 @@ function renderTake(take) {
   if (take.state === 'choose_track') {
     head.append(discard);
     box.append(renderTrackChooser(take));
+    return box;
+  }
+  // Several speakers and AI identification on: clips are reviewed per character, not per file
+  if (take.state === 'done' && take.speakers && characterReview()) {
+    box.classList.add('take--compact');
+    head.append(take.attributed
+      ? el('span', { className: 'pill pill--ok', textContent: 'Lines identified', title: 'Pick a character above to review their clips' })
+      : el('span', { className: 'pill', textContent: people.identify?.running ? 'AI reading…' : 'Waiting for AI' }),
+    discard);
     return box;
   }
 
