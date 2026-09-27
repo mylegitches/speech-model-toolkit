@@ -1381,6 +1381,10 @@ const clipKey = (clip) => `${clip.take}:${clip.index}`;
 function renderCharacter() {
   const panel = $('#character-panel');
   const { name, confirmed, possible } = charUi.data;
+  // Rebuilding the panel (e.g. after Save) keeps you where you were in each file's list
+  const scrolls = new Map([...panel.querySelectorAll('details.char-file')]
+    .map((d) => [d.dataset.id, d.querySelector('.clips')?.scrollTop || 0]));
+  const pageY = window.scrollY;
   panel.innerHTML = '';
   const files = new Set([...confirmed, ...possible].map((c) => c.take)).size;
   const close = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '✕ Close' });
@@ -1427,6 +1431,7 @@ function renderCharacter() {
     [...byFile.values()].forEach((fileClips, i) => {
       const id = `${possibleSection ? 'p' : 'c'}:${fileClips[0].take}`;
       const details = el('details', { className: 'char-file' });
+      details.dataset.id = id;
       if (charUi.open.has(id) || (!possibleSection && i === 0 && !charUi.open.size)) details.open = true;
       const label = el('span', { className: 'char-file-name', textContent: fileSummary(fileClips, ticked) });
       const refresh = () => { label.textContent = fileSummary(fileClips, ticked); updateSave(); };
@@ -1464,6 +1469,7 @@ function renderCharacter() {
         const list = el('div', { className: 'clips' });
         fileClips.forEach((clip) => list.append(characterClipRow(clip, ticked, refresh)));
         details.append(list);
+        list.scrollTop = scrolls.get(id) || 0;
       };
       details.addEventListener('toggle', () => {
         if (details.open) { charUi.open.add(id); fill(); } else charUi.open.delete(id);
@@ -1507,6 +1513,12 @@ function renderCharacter() {
   });
   panel.append(el('div', { className: 'take-foot' }, save));
   updateSave();
+  // Scroll positions only take once the lists are on the page
+  panel.querySelectorAll('details.char-file').forEach((d) => {
+    const list = d.querySelector('.clips');
+    if (list && scrolls.has(d.dataset.id)) list.scrollTop = scrolls.get(d.dataset.id);
+  });
+  if (scrolls.size) window.scrollTo(0, pageY);
 }
 
 /** "S01E03.mkv · 12 clips · 5 saved · 4 ticked" */
@@ -1542,8 +1554,21 @@ function characterClipRow(clip, ticked, changed) {
     title: clip.saved ? 'In the dataset: untick to take it out' : 'Save this clip' });
   keep.addEventListener('change', async () => {
     if (clip.saved) {
-      keep.checked = true;  // stays until it's really out of the dataset
-      await unsaveClips([clip], 'this clip');
+      // Out of the dataset right away, no questions; only this row changes (no jump in the list)
+      keep.disabled = true;
+      try {
+        const result = await postJson(voiceUrl('/clips/unsave'), { clips: [{ take: clip.take, index: clip.index }] });
+        updateRecorded(result.recorded);
+      } catch (err) {
+        SMT.showError(err.message);
+        keep.checked = true;
+        keep.disabled = false;
+        return;
+      }
+      clip.saved = false;
+      charUi.keep.set(key, false);
+      outer.replaceWith(characterClipRow(clip, ticked, changed));
+      changed();
       return;
     }
     charUi.keep.set(key, keep.checked);
@@ -1569,8 +1594,10 @@ function characterClipRow(clip, ticked, changed) {
   });
   markEdited();
   row.append(keep, play, text, status);
-  if (!clip.reason) return row;
-  return el('div', { className: 'clip-with-reason' }, row, el('small', { className: 'hint', textContent: clip.reason }));
+  const outer = clip.reason
+    ? el('div', { className: 'clip-with-reason' }, row, el('small', { className: 'hint', textContent: clip.reason }))
+    : row;
+  return outer;
 }
 
 async function loadTakes() {
