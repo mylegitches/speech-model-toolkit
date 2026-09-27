@@ -1420,15 +1420,29 @@ function renderCharacter() {
       const id = `${possibleSection ? 'p' : 'c'}:${fileClips[0].take}`;
       const details = el('details', { className: 'char-file' });
       if (charUi.open.has(id) || (!possibleSection && i === 0 && !charUi.open.size)) details.open = true;
-      details.append(el('summary', { textContent: fileSummary(fileClips, ticked) }));
+      const label = el('span', { className: 'char-file-name', textContent: fileSummary(fileClips, ticked) });
+      const refresh = () => { label.textContent = fileSummary(fileClips, ticked); updateSave(); };
+      // Tick or untick a whole file (saved clips stay as they are), open or not
+      const tickFile = (on) => (e) => {
+        e.preventDefault();  // a button in the summary would otherwise open/close the file
+        e.stopPropagation();
+        fileClips.forEach((c) => { if (!c.saved) charUi.keep.set(clipKey(c), on); });
+        details.querySelectorAll('.clip:not(.clip--saved)').forEach((row) => {
+          row.querySelector('input[type=checkbox]').checked = on;
+          row.classList.toggle('skipped', !on);
+        });
+        refresh();
+      };
+      const tickAll = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Tick all' });
+      tickAll.addEventListener('click', tickFile(true));
+      const untickAll = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Untick all' });
+      untickAll.addEventListener('click', tickFile(false));
+      details.append(el('summary', {}, label, el('span', { className: 'char-file-tools' }, tickAll, untickAll)));
       const fill = () => {
         if (details.dataset.filled) return;
         details.dataset.filled = '1';
         const list = el('div', { className: 'clips' });
-        fileClips.forEach((clip) => list.append(characterClipRow(clip, ticked, () => {
-          details.querySelector('summary').textContent = fileSummary(fileClips, ticked);
-          updateSave();
-        })));
+        fileClips.forEach((clip) => list.append(characterClipRow(clip, ticked, refresh)));
         details.append(list);
       };
       details.addEventListener('toggle', () => {

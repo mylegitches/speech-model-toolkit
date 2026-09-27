@@ -153,7 +153,13 @@
 .chip:hover { border-color: var(--accent); }
 .chip--on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .char-file { border-top: 1px solid var(--border); padding: 0.35rem 0; }
-.char-file summary { cursor: pointer; font-size: 0.9rem; }
+.char-file summary { cursor: pointer; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.char-file summary::before { content: '▸'; color: var(--muted); }
+.char-file[open] summary::before { content: '▾'; }
+.char-file summary::-webkit-details-marker { display: none; }
+.char-file-name { flex: 1; min-width: 12rem; }
+.char-file-tools { display: flex; gap: 0.3rem; }
+.char-file-tools .btn { padding: 0.15rem 0.5rem; font-size: 0.76rem; min-height: 0; }
 .char-file .clips { margin-top: 0.4rem; }
 .clip-with-reason { display: flex; flex-direction: column; gap: 0.1rem; }
 .clip-with-reason small { padding-left: 4.2rem; }
