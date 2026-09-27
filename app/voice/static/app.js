@@ -1401,7 +1401,10 @@ function renderCharacter() {
     save.textContent = `✓ Save ${n} ticked clip${n === 1 ? '' : 's'} of ${name} to the dataset`;
     save.disabled = n === 0;
   };
-  const ticked = (clip) => charUi.keep.get(clipKey(clip)) ?? !clip.possible;  // confirmed ticked, possible not
+  // Default: confirmed ticked, possible not. A file with saved clips has been reviewed,
+  // so what wasn't saved there was left out on purpose: unticked.
+  const reviewed = new Set([...confirmed, ...possible].filter((c) => c.saved).map((c) => c.take));
+  const ticked = (clip) => charUi.keep.get(clipKey(clip)) ?? (!clip.possible && !reviewed.has(clip.take));
 
   const section = (title, clips, possibleSection) => {
     if (!clips.length) return;
