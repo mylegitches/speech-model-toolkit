@@ -186,6 +186,11 @@ def test_saving_clips_keeps_the_files(voice, monkeypatch):
     assert saved == 2 and voice.num_recorded() == 2
     assert take(voice, "t1")["segments"][0]["saved"] and not take(voice, "t1")["segments"][1].get("saved")
 
+    # Taken back out: the recording goes, the clip stays in the review
+    assert freeform.unsave_clips(voice, [{"take": "t1", "index": 0}]) == 1
+    assert voice.num_recorded() == 1 and not take(voice, "t1")["segments"][0]["saved"]
+    assert not list((voice.recordings_dir / "freeform").glob("t1_0000.*"))
+
 
 def test_show_hints_from_paths():
     ids, names = identify._show_hints(["The Sopranos/Season 1/S01E01 tt0141842.mkv", "clip.mp4"])

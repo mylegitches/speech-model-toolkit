@@ -316,6 +316,14 @@ async def api_save_clips(name: str, request: SaveClipsRequest) -> Dict[str, Any]
     return {"saved": saved, "recorded": voice.num_recorded()}
 
 
+@app.post("/api/voices/{name}/clips/unsave")
+async def api_unsave_clips(name: str, request: SaveClipsRequest) -> Dict[str, Any]:
+    """Take saved clips back out of the dataset (they stay in the review)."""
+    voice = store.get(name)
+    removed = await asyncio.to_thread(freeform.unsave_clips, voice, request.clips)
+    return {"removed": removed, "recorded": voice.num_recorded()}
+
+
 class FocusRequest(BaseModel):
     ids: List[str]
 

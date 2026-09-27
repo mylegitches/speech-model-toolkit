@@ -40,7 +40,7 @@ from ..lab import stt
 from ..settings import store as settings_store
 from . import identify
 from . import speakers as people
-from .voices import Voice
+from .voices import AUDIO_EXTENSIONS, Voice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -590,6 +590,37 @@ def save_clips(voice: Voice, clips: List[Dict[str, Any]]) -> int:
         _write(take_dir, take)
     _LOGGER.info("Voice %s: saved %d clips from %d files as recordings", voice.name, saved, len(by_take))
     return saved
+
+
+def unsave_clips(voice: Voice, clips: List[Dict[str, Any]]) -> int:
+    """Take saved clips back out of the dataset (their recordings are deleted; the clips
+    stay in the review, with the text as it was saved)."""
+    by_take: Dict[str, List[int]] = {}
+    for clip in clips:
+        by_take.setdefault(str(clip.get("take", "")), []).append(int(clip.get("index", -1)))
+    removed = 0
+    for take_id, indexes in by_take.items():
+        take_dir = _take_dir(voice, take_id)
+        if take_id in _live:
+            raise RuntimeError("That file is still being processed; wait for it to finish")
+        take = _read(take_dir)
+        segments = take["segments"]
+        for index in indexes:
+            if not 0 <= index < len(segments):
+                continue
+            stem = voice.recordings_dir / GROUP / f"{take_id}_{index:04d}"
+            found = False
+            for ext in (*AUDIO_EXTENSIONS, ".txt"):
+                path = stem.with_suffix(ext)
+                if path.exists():
+                    path.unlink()
+                    found = True
+            if found or segments[index].get("saved"):
+                removed += 1
+            segments[index]["saved"] = False
+        _write(take_dir, take)
+    _LOGGER.info("Voice %s: took %d clips from %d files out of the dataset", voice.name, removed, len(by_take))
+    return removed
 
 
 def retag_person(voice: Voice, take_id: str, old: str, new: str) -> None:

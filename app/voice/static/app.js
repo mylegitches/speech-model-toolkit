@@ -1437,7 +1437,19 @@ function renderCharacter() {
       tickAll.addEventListener('click', tickFile(true));
       const untickAll = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Untick all' });
       untickAll.addEventListener('click', tickFile(false));
-      details.append(el('summary', {}, label, el('span', { className: 'char-file-tools' }, tickAll, untickAll)));
+      const tools = el('span', { className: 'char-file-tools' }, tickAll, untickAll);
+      const savedHere = fileClips.filter((c) => c.saved);
+      if (savedHere.length) {
+        const remove = el('button', { type: 'button', className: 'btn btn--ghost', textContent: `Remove ${savedHere.length} saved`,
+          title: 'Take this file\'s saved clips back out of the dataset (they stay here to review)' });
+        remove.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          unsaveClips(savedHere, `${savedHere.length} saved clip${savedHere.length === 1 ? '' : 's'} of ${fileClips[0].file}`);
+        });
+        tools.append(remove);
+      }
+      details.append(el('summary', {}, label, tools));
       const fill = () => {
         if (details.dataset.filled) return;
         details.dataset.filled = '1';
@@ -1487,13 +1499,35 @@ function fileSummary(clips, ticked) {
     `${n} ticked`].filter(Boolean).join(' · ');
 }
 
+/** Take saved clips back out of the dataset; they stay in the review. */
+async function unsaveClips(clips, what) {
+  if (!confirm(`Take ${what} out of the dataset? They stay here, so you can review and save them again.`)) return false;
+  try {
+    const result = await postJson(voiceUrl('/clips/unsave'), { clips: clips.map((c) => ({ take: c.take, index: c.index })) });
+    updateRecorded(result.recorded);
+    $('#free-upload-status').textContent = `Took ${result.removed} clips out of the dataset.`;
+  } catch (err) {
+    SMT.showError(err.message);
+    return false;
+  }
+  clips.forEach((c) => charUi.keep.delete(clipKey(c)));
+  openCharacter(charUi.name, true);
+  loadPeople();
+  return true;
+}
+
 function characterClipRow(clip, ticked, changed) {
   const key = clipKey(clip);
   // Saved clips stay in the list, coloured, so you can see what's already in the dataset
   const row = el('div', { className: `clip${clip.saved ? ' clip--saved' : ticked(clip) ? '' : ' skipped'}` });
-  const keep = el('input', { type: 'checkbox', checked: clip.saved || ticked(clip), disabled: clip.saved,
-    title: clip.saved ? 'Already in the dataset' : 'Save this clip' });
-  keep.addEventListener('change', () => {
+  const keep = el('input', { type: 'checkbox', checked: clip.saved || ticked(clip),
+    title: clip.saved ? 'In the dataset: untick to take it out' : 'Save this clip' });
+  keep.addEventListener('change', async () => {
+    if (clip.saved) {
+      keep.checked = true;  // stays until it's really out of the dataset
+      await unsaveClips([clip], 'this clip');
+      return;
+    }
     charUi.keep.set(key, keep.checked);
     row.classList.toggle('skipped', !keep.checked);
     changed();
