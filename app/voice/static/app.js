@@ -1435,33 +1435,40 @@ function renderCharacter() {
       if (charUi.open.has(id) || (!possibleSection && i === 0 && !charUi.open.size)) details.open = true;
       const label = el('span', { className: 'char-file-name', textContent: fileSummary(fileClips, ticked) });
       const refresh = () => { label.textContent = fileSummary(fileClips, ticked); updateSave(); };
-      // Tick or untick a whole file (saved clips stay as they are), open or not
-      const tickFile = (on) => (e) => {
+      // Tick or untick a whole file, open or not. Untick all also takes its saved clips
+      // out of the dataset (like unticking them one by one); Tick all leaves them saved.
+      const tickFile = (on) => async (e) => {
         e.preventDefault();  // a button in the summary would otherwise open/close the file
         e.stopPropagation();
+        const savedHere = on ? [] : fileClips.filter((c) => c.saved);
+        if (savedHere.length) {
+          try {
+            const result = await postJson(voiceUrl('/clips/unsave'), {
+              clips: savedHere.map((c) => ({ take: c.take, index: c.index })),
+            });
+            updateRecorded(result.recorded);
+          } catch (err) {
+            SMT.showError(err.message);
+            return;
+          }
+          savedHere.forEach((c) => { c.saved = false; });
+        }
         fileClips.forEach((c) => { if (!c.saved) charUi.keep.set(clipKey(c), on); });
-        details.querySelectorAll('.clip:not(.clip--saved)').forEach((row) => {
-          row.querySelector('input[type=checkbox]').checked = on;
-          row.classList.toggle('skipped', !on);
-        });
+        const list = details.querySelector('.clips');
+        if (list) {
+          // Redraw this file's rows in place (no jump in the list)
+          const top = list.scrollTop;
+          list.replaceChildren(...fileClips.map((clip) => characterClipRow(clip, ticked, refresh)));
+          list.scrollTop = top;
+        }
         refresh();
       };
       const tickAll = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Tick all' });
       tickAll.addEventListener('click', tickFile(true));
-      const untickAll = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Untick all' });
+      const untickAll = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Untick all',
+        title: 'Untick every clip of this file, and take its saved clips out of the dataset' });
       untickAll.addEventListener('click', tickFile(false));
       const tools = el('span', { className: 'char-file-tools' }, tickAll, untickAll);
-      const savedHere = fileClips.filter((c) => c.saved);
-      if (savedHere.length) {
-        const remove = el('button', { type: 'button', className: 'btn btn--ghost', textContent: `Remove ${savedHere.length} saved`,
-          title: 'Take this file\'s saved clips back out of the dataset (they stay here to review)' });
-        remove.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          unsaveClips(savedHere, `${savedHere.length} saved clip${savedHere.length === 1 ? '' : 's'} of ${fileClips[0].file}`);
-        });
-        tools.append(remove);
-      }
       details.append(el('summary', {}, label, tools));
       const fill = () => {
         if (details.dataset.filled) return;
@@ -1527,23 +1534,6 @@ function fileSummary(clips, ticked) {
   const n = clips.filter((c) => !c.saved && ticked(c)).length;
   return [clips[0].file, `${clips.length} clip${clips.length === 1 ? '' : 's'}`, saved && `${saved} saved`,
     `${n} ticked`].filter(Boolean).join(' · ');
-}
-
-/** Take saved clips back out of the dataset; they stay in the review. */
-async function unsaveClips(clips, what) {
-  if (!confirm(`Take ${what} out of the dataset? They stay here, so you can review and save them again.`)) return false;
-  try {
-    const result = await postJson(voiceUrl('/clips/unsave'), { clips: clips.map((c) => ({ take: c.take, index: c.index })) });
-    updateRecorded(result.recorded);
-    $('#free-upload-status').textContent = `Took ${result.removed} clips out of the dataset.`;
-  } catch (err) {
-    SMT.showError(err.message);
-    return false;
-  }
-  clips.forEach((c) => charUi.keep.delete(clipKey(c)));
-  openCharacter(charUi.name, true);
-  loadPeople();
-  return true;
 }
 
 function characterClipRow(clip, ticked, changed) {
