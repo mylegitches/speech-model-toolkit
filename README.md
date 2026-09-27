@@ -119,7 +119,7 @@ The microphone is ignored while a reply plays, so the reply can't trigger the wa
 
   Keys are stored in `data/settings.json` (readable only by its owner) and are never sent back to the browser. **There is no login**, so if you save keys, bind the port to this machine only (`"127.0.0.1:8765:8765"` in `docker-compose.yml`).
 - **Assistant**: which connection answers, the system prompt (short, speakable answers by default), temperature, max tokens, and the fixed reply.
-- **Speaker identification (AI)**: turn it on, and choose whether to look up the cast on TVmaze, let the AI search the web (OpenRouter, Perplexity, Gemini, Anthropic, OpenAI search models), name cards automatically and merge cards automatically. File names and a few transcribed lines per person are sent to your AI provider.
+- **Speaker identification (AI)**: turn it on, and choose whether to look up the cast on TVmaze, let the AI search the web (OpenRouter, Perplexity, Gemini, Anthropic, OpenAI search models, Ollama Cloud), name cards automatically and merge cards automatically. The transcripts and file names of imported files are sent to your AI provider.
 - **Speech recognition**: Whisper model size and language, silence before a question ends, and the longest question. Models download on first use (or with **Download model now**) and run on the CPU.
 - **Audio**: microphone (with a level test), speaker (Chrome/Edge) with a test sound, and volume, all remembered by your browser and used in every tab. Also echo cancellation / noise suppression / auto gain for listening, wake word sensitivity (also used by the Wake Word tester), the pause after each reply, and whether generated `.wav` files can be downloaded.
 

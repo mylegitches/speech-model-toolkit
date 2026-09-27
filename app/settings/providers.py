@@ -9,6 +9,7 @@ Plain HTTP (httpx), no vendor SDKs. Four API styles cover every provider:
 """
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import asdict, dataclass
@@ -114,6 +115,8 @@ def web_search_support(conn: Optional[Dict[str, Any]]) -> str:
         return "Anthropic web search tool"
     if provider.id == "openai" and "search" in model:
         return "OpenAI search model"
+    if provider.id == "ollama-cloud":
+        return "Ollama web search (the model calls it as a tool)"
     return ""
 
 
@@ -380,9 +383,13 @@ async def _chat(
         }
         if think is not None:
             body["think"] = think
-        if json_mode:
-            body["format"] = "json"
-        data = await _request(client, "POST", f"{base}/api/chat", headers, body)
+        if search and provider.id == "ollama-cloud":
+            # The model calls Ollama's web search/fetch as tools; JSON mode would stop it from calling them
+            data = await _ollama_search_chat(client, base, headers, body, model)
+        else:
+            if json_mode:
+                body["format"] = "json"
+            data = await _request(client, "POST", f"{base}/api/chat", headers, body)
         text = (data.get("message") or {}).get("content", "")
         finish = data.get("done_reason") or ""
 
@@ -422,6 +429,81 @@ async def _chat(
                           + (f" (it stopped with \"{finish}\")" if finish else "")
                           + ". Try again, or another model.")
     return text
+
+
+OLLAMA_TOOLS = [
+    {"type": "function", "function": {
+        "name": "web_search",
+        "description": "Search the web. Returns the top results with their title, URL and text.",
+        "parameters": {"type": "object", "required": ["query"], "properties": {
+            "query": {"type": "string", "description": "What to search for, e.g. a quote in double quotes"},
+            "max_results": {"type": "integer", "description": "How many results (1-10, default 5)"},
+        }},
+    }},
+    {"type": "function", "function": {
+        "name": "web_fetch",
+        "description": "Read a web page (for example a transcript found with web_search).",
+        "parameters": {"type": "object", "required": ["url"], "properties": {
+            "url": {"type": "string", "description": "The page's URL"},
+        }},
+    }},
+]
+OLLAMA_TOOL_ROUNDS = 6
+"""Most search/fetch rounds before the model has to answer with what it found."""
+TOOL_RESULT_CHARS = 8000
+
+
+async def _ollama_search_chat(client: httpx.AsyncClient, base: str, headers: Dict[str, str],
+                              body: Dict[str, Any], model: str) -> Dict[str, Any]:
+    """Ollama Cloud chat where the model can search the web: run its tool calls
+    (https://ollama.com/api/web_search, /api/web_fetch with the same key) and
+    send the results back until it answers."""
+    body = {**body, "messages": list(body["messages"]), "tools": OLLAMA_TOOLS}
+    for _ in range(OLLAMA_TOOL_ROUNDS):
+        data = await _request(client, "POST", f"{base}/api/chat", headers, body)
+        message = data.get("message") or {}
+        calls = message.get("tool_calls") or []
+        if not calls:
+            return data
+        body["messages"].append({"role": "assistant", "content": message.get("content", ""), "tool_calls": calls})
+        for call in calls:
+            function = call.get("function") or {}
+            name = function.get("name", "")
+            args = function.get("arguments") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    args = {}
+            body["messages"].append({"role": "tool", "tool_name": name,
+                                     "content": await _ollama_tool(client, base, headers, name, args, model)})
+    # Out of rounds: answer with what was found
+    body.pop("tools")
+    body["messages"].append({"role": "user", "content": "Answer now with what you have found, in the format asked."})
+    return await _request(client, "POST", f"{base}/api/chat", headers, body)
+
+
+async def _ollama_tool(client: httpx.AsyncClient, base: str, headers: Dict[str, str], name: str,
+                       args: Dict[str, Any], model: str) -> str:
+    try:
+        if name == "web_search":
+            query = str(args.get("query") or "")[:300]
+            try:
+                count = min(10, max(1, int(args.get("max_results") or 5)))
+            except (TypeError, ValueError):
+                count = 5
+            _LOGGER.info("AI ollama-cloud/%s searches the web: %s", model, query)
+            result = await _request(client, "POST", f"{base}/api/web_search", headers,
+                                    {"query": query, "max_results": count})
+        elif name == "web_fetch":
+            url = str(args.get("url") or "")[:500]
+            _LOGGER.info("AI ollama-cloud/%s reads %s", model, url)
+            result = await _request(client, "POST", f"{base}/api/web_fetch", headers, {"url": url})
+        else:
+            return f"Unknown tool {name}"
+    except ProviderError as err:
+        return f"The {name} call failed: {err}"
+    return json.dumps(result, ensure_ascii=False)[:TOOL_RESULT_CHARS]
 
 
 async def _anthropic_chat(

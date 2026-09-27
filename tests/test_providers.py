@@ -266,3 +266,34 @@ def test_ollama_json_mode():
     conn = {"provider": "ollama-cloud", "apiKey": "k", "model": "m"}
     run(providers.chat(conn, [{"role": "user", "content": "hi"}], client=client, json_mode=True))
     assert body(seen[0])["format"] == "json"
+
+
+def test_ollama_cloud_searches_the_web_with_tool_calls():
+    chats = []
+
+    def handler(request):
+        if request.url.path == "/api/web_search":
+            assert body(request) == {"query": '"I\'m the boss here" Sopranos', "max_results": 3}
+            return 200, {"results": [{"title": "S01E01 transcript", "url": "https://x/1", "content": "TONY: I'm the boss here."}]}
+        chats.append(body(request))
+        if len(chats) == 1:
+            return 200, {"message": {"role": "assistant", "content": "", "tool_calls": [
+                {"function": {"name": "web_search", "arguments": {"query": '"I\'m the boss here" Sopranos', "max_results": 3}}}]}}
+        return 200, {"message": {"role": "assistant", "content": '{"lines": [["L1", "Tony Soprano", "high"]]}'},
+                      "done_reason": "stop"}
+
+    client, seen = mock_client(handler)
+    conn = {"provider": "ollama-cloud", "apiKey": "k", "model": "minimax-m3"}
+    assert providers.web_search_support(conn)
+    reply = run(providers.chat(conn, [{"role": "user", "content": "who?"}], client=client,
+                               web_search=True, json_mode=True, think=False))
+    assert reply == '{"lines": [["L1", "Tony Soprano", "high"]]}'
+    assert [t["function"]["name"] for t in chats[0]["tools"]] == ["web_search", "web_fetch"]
+    assert "format" not in chats[0]  # JSON mode would stop the tool calls
+    tool_msg = chats[1]["messages"][-1]
+    assert tool_msg["role"] == "tool" and tool_msg["tool_name"] == "web_search" and "TONY: I'm the boss" in tool_msg["content"]
+    assert all(r.headers["authorization"] == "Bearer k" for r in seen)
+
+
+def test_local_ollama_has_no_web_search():
+    assert providers.web_search_support({"provider": "ollama", "model": "llama3"}) == ""
