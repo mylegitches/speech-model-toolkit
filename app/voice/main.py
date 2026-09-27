@@ -316,6 +316,19 @@ async def api_save_clips(name: str, request: SaveClipsRequest) -> Dict[str, Any]
     return {"saved": saved, "recorded": voice.num_recorded()}
 
 
+@app.post("/api/voices/{name}/clips/text")
+async def api_clip_text(name: str, request: SaveClipsRequest) -> Dict[str, Any]:
+    """Correct the transcripts of clips already in the dataset: [{take, index, text}]."""
+    voice = store.get(name)
+
+    def correct() -> int:
+        for clip in request.clips:
+            freeform.set_saved_text(voice, str(clip.get("take", "")), int(clip.get("index", -1)), str(clip.get("text", "")))
+        return len(request.clips)
+
+    return {"updated": await asyncio.to_thread(correct)}
+
+
 @app.post("/api/voices/{name}/clips/unsave")
 async def api_unsave_clips(name: str, request: SaveClipsRequest) -> Dict[str, Any]:
     """Take saved clips back out of the dataset (they stay in the review)."""

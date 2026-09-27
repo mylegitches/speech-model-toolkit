@@ -592,6 +592,26 @@ def save_clips(voice: Voice, clips: List[Dict[str, Any]]) -> int:
     return saved
 
 
+def set_saved_text(voice: Voice, take_id: str, index: int, text: str) -> str:
+    """Correct the transcript of a clip that's already in the dataset."""
+    text = " ".join(str(text).split())
+    if not text:
+        raise ValueError("The text can't be empty")
+    take_dir = _take_dir(voice, take_id)
+    take = _read(take_dir)
+    segments = take["segments"]
+    if not 0 <= index < len(segments) or not segments[index].get("saved"):
+        raise ValueError("That clip isn't in the dataset")
+    transcript = voice.recordings_dir / GROUP / f"{take_id}_{index:04d}.txt"
+    if not transcript.parent.is_dir():
+        raise ValueError("That clip isn't in the dataset")
+    transcript.write_text(text, encoding="utf-8")
+    segments[index]["savedText"] = text
+    _write(take_dir, take)
+    _LOGGER.info("Voice %s: corrected the text of saved clip %s/%d", voice.name, take_id, index)
+    return text
+
+
 def unsave_clips(voice: Voice, clips: List[Dict[str, Any]]) -> int:
     """Take saved clips back out of the dataset (their recordings are deleted; the clips
     stay in the review, with the text as it was saved)."""

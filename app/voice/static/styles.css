@@ -168,6 +168,9 @@
 .take--compact { padding-top: 0.5rem; padding-bottom: 0.5rem; }
 .clip.clip--saved { background: var(--accent-soft); border-radius: 6px; padding: 0.15rem 0.3rem; }
 .clip.clip--saved input[type=text] { color: var(--accent-text); border-color: transparent; background: transparent; }
+.clip.clip--saved input[type=text]:hover, .clip.clip--saved input[type=text]:focus { border-color: var(--accent); }
+.clip.clip--saved.clip--edited input[type=text] { border-color: #f59e0b; color: var(--text); }
+.clip.clip--saved.clip--edited .dur { color: #fbbf24; }
 .clip.clip--saved .dur { color: var(--accent-text); width: auto; }
 .clone-progress { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.9rem; }
 #clone-mode.dropping { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 8px; }

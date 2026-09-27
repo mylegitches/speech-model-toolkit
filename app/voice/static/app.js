@@ -1396,10 +1396,15 @@ function renderCharacter() {
   }));
 
   const save = el('button', { type: 'button', className: 'btn btn--primary' });
+  // Saved clips whose words were changed here: corrected in the dataset with the same Save
+  const corrections = () => [...confirmed, ...possible].filter((c) => c.saved
+    && charUi.text.has(clipKey(c)) && charUi.text.get(clipKey(c)).trim() && charUi.text.get(clipKey(c)).trim() !== c.text);
   const updateSave = () => {
     const n = [...confirmed, ...possible].filter((c) => !c.saved && ticked(c)).length;
-    save.textContent = `✓ Save ${n} ticked clip${n === 1 ? '' : 's'} of ${name} to the dataset`;
-    save.disabled = n === 0;
+    const fixes = corrections().length;
+    save.textContent = `✓ Save ${n} ticked clip${n === 1 ? '' : 's'}`
+      + (fixes ? ` and ${fixes} correction${fixes === 1 ? '' : 's'}` : '') + ` of ${name} to the dataset`;
+    save.disabled = n === 0 && fixes === 0;
   };
   // Default: confirmed ticked, possible not. A file with saved clips has been reviewed,
   // so what wasn't saved there was left out on purpose: unticked.
@@ -1478,12 +1483,22 @@ function renderCharacter() {
     const clips = [...confirmed, ...possible].filter((c) => !c.saved && ticked(c))
       .map((c) => ({ take: c.take, index: c.index, text: (charUi.text.get(clipKey(c)) ?? c.text).trim() }))
       .filter((c) => c.text);
+    const fixes = corrections().map((c) => ({ take: c.take, index: c.index, text: charUi.text.get(clipKey(c)).trim() }));
     save.disabled = true;
-    save.textContent = `Saving ${clips.length} clips…`;
+    save.textContent = 'Saving…';
+    const done = [];
     try {
-      const result = await postJson(voiceUrl('/clips/save'), { clips });
-      updateRecorded(result.recorded);
-      $('#free-upload-status').textContent = `Added ${result.saved} clips of ${name} to the dataset.`;
+      if (clips.length) {
+        const result = await postJson(voiceUrl('/clips/save'), { clips });
+        updateRecorded(result.recorded);
+        done.push(`added ${result.saved} clips`);
+      }
+      if (fixes.length) {
+        const result = await postJson(voiceUrl('/clips/text'), { clips: fixes });
+        fixes.forEach((c) => charUi.text.delete(`${c.take}:${c.index}`));
+        done.push(`corrected ${result.updated} clip${result.updated === 1 ? '' : 's'}`);
+      }
+      $('#free-upload-status').textContent = `${name}: ${done.join(' and ')} in the dataset.`;
     } catch (err) {
       SMT.showError(err.message);
     }
@@ -1537,11 +1552,23 @@ function characterClipRow(clip, ticked, changed) {
   });
   const play = el('button', { type: 'button', className: 'btn btn--secondary', textContent: '▶' });
   play.addEventListener('click', () => playClip({ id: clip.take, denoise: clip.denoise }, clip.index, play));
-  const text = el('input', { type: 'text', value: charUi.text.get(key) ?? clip.text, disabled: clip.saved });
-  text.addEventListener('input', () => charUi.text.set(key, text.value));
-  row.append(keep, play, text,
-    el('span', { className: 'dur', textContent: clip.saved ? '✓ saved' : `${(clip.end - clip.start).toFixed(1)}s`,
-      title: `at ${clock(clip.start)} in ${clip.file}` }));
+  const text = el('input', { type: 'text', value: charUi.text.get(key) ?? clip.text });
+  const status = el('span', { className: 'dur', textContent: clip.saved ? '✓ saved' : `${(clip.end - clip.start).toFixed(1)}s`,
+    title: `at ${clock(clip.start)} in ${clip.file}` });
+  const markEdited = () => {
+    // A saved clip with new words: corrected in the dataset with the next Save
+    const edited = clip.saved && text.value.trim() !== clip.text;
+    row.classList.toggle('clip--edited', edited);
+    if (clip.saved) status.textContent = edited ? 'edited' : '✓ saved';
+  };
+  if (clip.saved) text.title = 'In the dataset: fix the words, then Save to update it';
+  text.addEventListener('input', () => {
+    charUi.text.set(key, text.value);
+    markEdited();
+    changed();
+  });
+  markEdited();
+  row.append(keep, play, text, status);
   if (!clip.reason) return row;
   return el('div', { className: 'clip-with-reason' }, row, el('small', { className: 'hint', textContent: clip.reason }));
 }

@@ -186,6 +186,13 @@ def test_saving_clips_keeps_the_files(voice, monkeypatch):
     assert saved == 2 and voice.num_recorded() == 2
     assert take(voice, "t1")["segments"][0]["saved"] and not take(voice, "t1")["segments"][1].get("saved")
 
+    # The words of a saved clip can still be corrected: its transcript in the dataset changes
+    assert freeform.set_saved_text(voice, "t1", 0, "  I'm the  boss here! ") == "I'm the boss here!"
+    assert (voice.recordings_dir / "freeform" / "t1_0000.txt").read_text(encoding="utf-8") == "I'm the boss here!"
+    assert identify.character_clips(voice, "nobody") == {"name": "nobody", "confirmed": [], "possible": []}
+    with pytest.raises(ValueError):
+        freeform.set_saved_text(voice, "t1", 1, "not saved")
+
     # Taken back out: the recording goes, the clip stays in the review
     assert freeform.unsave_clips(voice, [{"take": "t1", "index": 0}]) == 1
     assert voice.num_recorded() == 1 and not take(voice, "t1")["segments"][0]["saved"]
