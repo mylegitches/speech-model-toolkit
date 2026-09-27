@@ -79,7 +79,7 @@ def status(voice: Voice) -> Dict[str, Any]:
     conn = settings_store.active_connection()
     settings = settings_store.load()["identify"]
     return {
-        "enabled": settings["enabled"],
+        "enabled": True,  # Character clone always identifies; it only needs an AI connection
         "connected": bool(conn),
         "provider": providers.get_provider(conn["provider"]).label if conn else None,
         "webSearch": providers.web_search_support(conn) if settings["webSearch"] else "",
@@ -295,7 +295,8 @@ def _canonical(name: Optional[str], cast_names: List[str]) -> Optional[str]:
 
 
 def _takes(voice: Voice) -> List[Tuple[str, Dict[str, Any]]]:
-    """Imported files with speaker detection that are done: [(take id, take)], by file name."""
+    """Character clone files that are done: [(take id, take)], by file name.
+    (Files the AI already read before the Character clone tab existed count too.)"""
     from . import freeform  # freeform imports this module
 
     found = []
@@ -307,7 +308,8 @@ def _takes(voice: Voice) -> List[Tuple[str, Dict[str, Any]]]:
             take = freeform._read(take_dir)
         except (OSError, ValueError):
             continue
-        if take.get("state") == "done" and take.get("speakers") and take.get("segments"):
+        if (take.get("state") == "done" and take.get("speakers") and take.get("segments")
+                and (take.get("clone") or take.get("attributed"))):
             found.append((take_dir.name, take))
     return sorted(found, key=lambda t: (t[1].get("name") or t[0]).lower())
 
@@ -556,7 +558,8 @@ def character_clips(voice: Voice, name: str) -> Dict[str, Any]:
             if character != name and not (character is None and "character" in segment and owner == name):
                 continue
             clip = {
-                "take": take_id, "file": take.get("name") or take_id, "index": index, "text": segment["text"],
+                "take": take_id, "file": take.get("name") or take_id, "index": index,
+                "text": segment.get("savedText") or segment["text"],
                 "start": segment["start"], "end": segment["end"], "conf": segment.get("conf"),
                 "saved": bool(segment.get("saved")), "denoise": take.get("denoise") or "off",
             }
@@ -650,7 +653,6 @@ def schedule(voice: Voice, everyone: bool = False) -> None:
 
 
 def after_take(voice: Voice) -> None:
-    """Called when a diarized file is done: identify new people if enabled."""
-    settings = settings_store.load()
-    if settings["identify"]["enabled"] and settings_store.active_connection(settings):
+    """Called when a Character clone file is done: work out who says each line."""
+    if settings_store.active_connection():
         schedule(voice)

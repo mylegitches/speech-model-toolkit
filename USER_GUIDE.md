@@ -126,15 +126,6 @@ Every file is compared with the people found in your earlier files, so the same 
 - With many people, **Find a person…** searches by name, and people with little speech are behind **Show all**.
 - **▶** plays one of their clips.
 
-**Let AI work out who says what (optional).** With an AI connection and **Speaker identification** turned on in Settings, the AI reads each imported file's transcript like a script and says who speaks every line:
-
-1. **Import** the episodes or movie with **Several people talking** ticked. Each file is transcribed and split into voices.
-2. **The AI attributes every line**, in order, using who is addressed and who replies, the voice groups, the show's cast (from TVmaze: name the show's folder, e.g. `The Sopranos/Season 1/…`, name the files `The.Sopranos.S01E01…`, or keep the IMDb ID `tt…` in the name; file metadata works too) and, with **web search** on a provider that supports it, looking lines up online. A line is **confirmed** when the AI is sure *and* the line's voice agrees with the rest of that character's lines in the file.
-3. **Pick a character** from the list at the top of the People panel (e.g. *Tony Soprano · 640 ✓ · 172 ?*).
-4. **Review their clips** across all files: **Confirmed** clips are ticked, **Possible** ones (the AI is less sure, or the voice doesn't match) are not, each with the reason. ▶ to listen, fix words, untick music, shouting, whispering or other voices, then **Save N ticked clips to the dataset**. The files stay, so you can come back for more (saved clips are marked).
-
-With it on, each file with several people shows as one line in the list (*Lines identified* once the AI has read it, or *Waiting for AI*); there's no per-file speaker picker, since clips are reviewed per character. It runs after every imported file; **🔎 Identify with AI** does the files not done yet (Shift-click: all of them again). The voice cards behind the characters are under **Voice cards** for renaming and merging by hand.
-
 Once the person you want is marked, review the clips of each file, then use **✓ Save *name*'s clips from all files** to add all of them to the dataset at once. Unticked clips stay out.
 
 > Only use recordings of people who agreed to have their voice cloned.
@@ -142,6 +133,18 @@ Once the person you want is marked, review the clips of each file, then use **�
 **Already have a prepared dataset?** Under **Import file**, open *Already have a prepared dataset?* and import a zip with `metadata.csv` (`file|text` per line) plus the audio, or audio files each next to a `.txt` with its transcript. These clips are added as they are.
 
 **Export the dataset.** **⬇ Export dataset (.zip)**, next to the clip count, downloads all saved clips: `metadata.csv` (`id|text` per line) and the audio in `wavs/`, the LJSpeech layout that Piper and most TTS trainers use. Use it as a backup, to train elsewhere, or to import into another voice here.
+
+### Character clone
+
+Clone one character from a TV show or film (Voice → Dataset → **Character clone**). It needs an AI connection (Settings → AI connections); **Import file** is the simpler way without AI: it splits the speakers and you pick one per file.
+
+1. **Add an episode, a season folder or a whole series**: **🎬 Add episodes**, **📁 Add a season or series folder**, or drag them onto the tab, then **Add**. Background noise is removed by default (music, effects).
+2. **Each file is transcribed and split into voices**, then **the AI reads the transcript like a script** and says who speaks every line. It uses who is addressed and who replies, the voice groups, the show's cast (from TVmaze: name the show's folder, e.g. `The Sopranos/Season 1/…`, name the files `The.Sopranos.S01E01…`, keep the IMDb ID `tt…` in the name, or rely on file metadata) and, with web search on a provider that supports it (OpenRouter, Perplexity, Gemini, Anthropic, OpenAI search models, Ollama Cloud), looking lines up online. A line is **confirmed** when the AI is sure *and* its voice agrees with the rest of that character's lines in the file. The progress line shows how many files are being prepared, waiting for the AI and read.
+3. **Pick a character** from the list (e.g. *Tony Soprano · 640 ✓ · 172 ?*). It's remembered, also after a reload.
+4. **Review their clips** across all files, by file: **Confirmed** clips are ticked, **Possible** ones (the AI is less sure, or the voice doesn't match) are not, each with the reason. ▶ to listen, fix wrong words, untick music, shouting, whispering or other voices, then **✓ Save N ticked clips to the dataset**. Saved clips turn green and stay in the list, with the text you saved.
+5. **Add more episodes whenever you like.** Your character stays selected; when the new files have been read, their clips appear in the review, and your ticks and edits so far are kept.
+
+**🔎 Identify with AI** reads the files not done yet again (Shift-click: all of them), e.g. after changing the AI connection.
 
 ### Reviewing clips
 

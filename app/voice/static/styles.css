@@ -159,6 +159,11 @@
 .voice-cards > summary { cursor: pointer; color: var(--muted); margin: 0.3rem 0; }
 .people-cards { display: flex; flex-direction: column; gap: 0.6rem; }
 .take--compact { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.clip.clip--saved { background: var(--accent-soft); border-radius: 6px; padding: 0.15rem 0.3rem; }
+.clip.clip--saved input[type=text] { color: var(--accent-text); border-color: transparent; background: transparent; }
+.clip.clip--saved .dur { color: var(--accent-text); width: auto; }
+.clone-progress { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.9rem; }
+#clone-mode.dropping { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 8px; }
 .focus-banner { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; background: var(--accent-soft);
   border-radius: 8px; padding: 0.5rem 0.7rem; font-size: 0.9rem; }
 .focus-banner span { flex: 1; min-width: 12rem; }

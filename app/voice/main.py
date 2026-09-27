@@ -258,6 +258,7 @@ async def api_freeform_start(
     diarize: bool = Form(False),
     mic: str = Form(""),
     original_name: str = Form(""),  # e.g. "Season 1/episode 03.mkv" from a folder import
+    clone: bool = Form(False),  # Character clone: the AI then works out who says each line
 ) -> Dict[str, Any]:
     """A long take (recorded, or an uploaded audio/video file): transcribe it,
     split it into clips and, with diarize, find who speaks in each clip."""
@@ -268,7 +269,7 @@ async def api_freeform_start(
     source = freeform.new_take(voice, audio.filename or f"take{extension}")
     with open(source, "wb") as out:
         await asyncio.to_thread(shutil.copyfileobj, audio.file, out, 4 * 2**20)
-    take = freeform.start(voice, source, denoise, diarize, original_name or audio.filename or "")
+    take = freeform.start(voice, source, denoise, diarize or clone, original_name or audio.filename or "", clone)
     voice.remember_microphone(mic)
     return take
 

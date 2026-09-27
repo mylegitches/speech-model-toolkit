@@ -428,15 +428,25 @@ const renderedTakes = {};  // take id -> state it was last rendered in
 const takeEdits = {};      // take id -> {clips: {index: {keep, text}}, speakers: Set}
 
 function setMode(mode) {
-  if (!['prompts', 'free', 'file'].includes(mode)) mode = 'prompts';
+  if (!['prompts', 'free', 'file', 'clone'].includes(mode)) mode = 'prompts';
   recordMode = mode;
   document.querySelectorAll('.mode-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
-  show($('#mic-block'), mode !== 'file');
+  show($('#mic-block'), mode === 'prompts' || mode === 'free');
   show($('#prompt-mode'), mode === 'prompts');
   show($('#free-mode'), mode === 'free');
   show($('#file-mode'), mode === 'file');
+  show($('#clone-mode'), mode === 'clone');
   show($('#takes-block'), mode !== 'prompts');  // takes waiting for review
   try { localStorage.setItem('voice.recordMode', mode); } catch (e) { /* ignore */ }
+  setTimeout(modeViews, 0);  // after the page script has loaded (setMode also runs while it loads)
+}
+
+/** Each tab shows its own files: Character clone files there, the others under Speak freely / Import file. */
+function modeViews() {
+  if (!voice) return;
+  applyTakeFilter();
+  renderPeople();
+  renderClone();
 }
 document.querySelectorAll('.mode-btn').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
 try { setMode(localStorage.getItem('voice.recordMode') || 'prompts'); } catch (e) { setMode('prompts'); }
@@ -500,67 +510,11 @@ $('#free-record-btn').addEventListener('click', async () => {
 
 const MEDIA_FILE = /\.(mkv|mp4|m4v|avi|mov|wmv|flv|webm|ts|m2ts|mts|mpg|mpeg|vob|3gp|ogv|mp3|wav|flac|ogg|opus|m4a|m4b|aac|ac3|eac3|dts|wma|aiff?)$/i;
 const VIDEO_FILE = /\.(mkv|mp4|m4v|avi|mov|wmv|flv|webm|ts|m2ts|mts|mpg|mpeg|vob|3gp|ogv)$/i;
-let importFiles = [];  // [{file, path, selected}]
-let importSkipped = 0;
-
 function formatSize(bytes) {
   return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`;
 }
 
-function setImportFiles(entries) {
-  const media = entries.filter((e) => MEDIA_FILE.test(e.path) || e.file.type.startsWith('video/') || e.file.type.startsWith('audio/'));
-  importSkipped = entries.length - media.length;
-  importFiles = media
-    .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }))
-    .map((e) => ({ ...e, selected: true }));
-  // Videos usually have several speakers (and a soundtrack)
-  if (importFiles.some((e) => VIDEO_FILE.test(e.path) || e.file.type.startsWith('video/'))) {
-    $('#free-diarize').checked = true;
-    $('#file-denoise').value = 'strong';
-  }
-  renderImportList();
-}
-
-function renderImportList() {
-  const box = $('#import-list');
-  box.innerHTML = '';
-  const chosen = importFiles.filter((e) => e.selected);
-  $('#free-upload-btn').textContent = chosen.length > 1 ? `Import ${chosen.length} files` : 'Import';
-  $('#free-upload-btn').disabled = chosen.length === 0;
-  if (!importFiles.length) {
-    if (importSkipped) box.append(el('p', { className: 'hint', textContent: `No audio or video files found (${importSkipped} other files skipped).` }));
-    show(box, importSkipped > 0);
-    return;
-  }
-  show(box, true);
-  const total = chosen.reduce((sum, e) => sum + e.file.size, 0);
-  const all = el('input', { type: 'checkbox', checked: chosen.length === importFiles.length, title: 'Select all' });
-  all.addEventListener('change', () => { importFiles.forEach((e) => { e.selected = all.checked; }); renderImportList(); });
-  box.append(el('div', { className: 'import-head' }, all, el('strong', {
-    textContent: `${chosen.length} of ${importFiles.length} file${importFiles.length === 1 ? '' : 's'} · ${formatSize(total)}`
-      + (importSkipped ? ` · ${importSkipped} other file${importSkipped === 1 ? '' : 's'} skipped` : ''),
-  })));
-  const list = el('div', { className: 'import-files' });
-  importFiles.forEach((entry) => {
-    const check = el('input', { type: 'checkbox', checked: entry.selected });
-    check.addEventListener('change', () => { entry.selected = check.checked; renderImportList(); });
-    list.append(el('label', { className: 'import-file' }, check,
-      el('span', { className: 'import-path', textContent: entry.path, title: entry.path }),
-      el('span', { className: 'dur', textContent: formatSize(entry.file.size) })));
-  });
-  box.append(list);
-}
-
-$('#free-file').addEventListener('change', () => {
-  setImportFiles([...$('#free-file').files].map((file) => ({ file, path: file.name })));
-});
-$('#free-folder-btn').addEventListener('click', () => $('#free-folder').click());
-$('#free-folder').addEventListener('change', () => {
-  // webkitRelativePath keeps the folder structure: "Season 1/episode 03.mkv"
-  setImportFiles([...$('#free-folder').files].map((file) => ({ file, path: file.webkitRelativePath || file.name })));
-});
-
-// Drag and drop files or folders onto the Import tab
+// Files and folders dropped on the page
 async function readEntry(entry, prefix = '') {
   if (entry.isFile) {
     const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
@@ -579,58 +533,143 @@ async function readEntry(entry, prefix = '') {
   return nested.flat();
 }
 
-const dropZone = $('#file-mode');
-['dragenter', 'dragover'].forEach((type) => dropZone.addEventListener(type, (e) => {
-  e.preventDefault();
-  dropZone.classList.add('dropping');
-}));
-['dragleave', 'drop'].forEach((type) => dropZone.addEventListener(type, () => dropZone.classList.remove('dropping')));
-dropZone.addEventListener('drop', async (e) => {
-  e.preventDefault();
-  const items = [...(e.dataTransfer.items || [])];
-  try {
-    const entries = items.map((i) => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null)).filter(Boolean);
-    const found = entries.length
-      ? (await Promise.all(entries.map((entry) => readEntry(entry)))).flat()
-      : [...e.dataTransfer.files].map((file) => ({ file, path: file.name }));
-    setImportFiles(found);
-  } catch (err) {
-    SMT.showError(`Could not read the dropped files: ${err.message}`);
+/**
+ * A file picker + list + upload button (Import file, and Character clone).
+ * Files and whole folders (with subfolders) can be picked or dropped; the list
+ * shows them with checkboxes, and the button uploads the ticked ones in order.
+ */
+function makeImporter({ list, button, file, fileBtn, folder, folderBtn, drop, status, options, picked, label }) {
+  const state = { files: [], skipped: 0 };
+
+  function set(entries) {
+    const media = entries.filter((e) => MEDIA_FILE.test(e.path) || e.file.type.startsWith('video/') || e.file.type.startsWith('audio/'));
+    state.skipped = entries.length - media.length;
+    // Adding to what's listed (e.g. a second season), without duplicates
+    const known = new Set(state.files.map((e) => e.path));
+    state.files = [...state.files, ...media.filter((e) => !known.has(e.path)).map((e) => ({ ...e, selected: true }))]
+      .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
+    if (picked) picked(state.files);
+    render();
   }
+
+  function render() {
+    const box = $(list);
+    box.innerHTML = '';
+    const chosen = state.files.filter((e) => e.selected);
+    $(button).textContent = label(chosen.length);
+    $(button).disabled = chosen.length === 0;
+    if (!state.files.length) {
+      if (state.skipped) box.append(el('p', { className: 'hint', textContent: `No audio or video files found (${state.skipped} other files skipped).` }));
+      show(box, state.skipped > 0);
+      return;
+    }
+    show(box, true);
+    const total = chosen.reduce((sum, e) => sum + e.file.size, 0);
+    const all = el('input', { type: 'checkbox', checked: chosen.length === state.files.length, title: 'Select all' });
+    all.addEventListener('change', () => { state.files.forEach((e) => { e.selected = all.checked; }); render(); });
+    const clear = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Clear list' });
+    clear.addEventListener('click', () => { state.files = []; state.skipped = 0; render(); });
+    box.append(el('div', { className: 'import-head' }, all, el('strong', {
+      textContent: `${chosen.length} of ${state.files.length} file${state.files.length === 1 ? '' : 's'} · ${formatSize(total)}`
+        + (state.skipped ? ` · ${state.skipped} other file${state.skipped === 1 ? '' : 's'} skipped` : ''),
+    }), clear));
+    const rows = el('div', { className: 'import-files' });
+    state.files.forEach((entry) => {
+      const check = el('input', { type: 'checkbox', checked: entry.selected });
+      check.addEventListener('change', () => { entry.selected = check.checked; render(); });
+      rows.append(el('label', { className: 'import-file' }, check,
+        el('span', { className: 'import-path', textContent: entry.path, title: entry.path }),
+        el('span', { className: 'dur', textContent: formatSize(entry.file.size) })));
+    });
+    box.append(rows);
+  }
+
+  $(file).addEventListener('change', () => {
+    set([...$(file).files].map((f) => ({ file: f, path: f.name })));
+    $(file).value = '';
+  });
+  if (fileBtn) $(fileBtn).addEventListener('click', () => $(file).click());
+  $(folderBtn).addEventListener('click', () => $(folder).click());
+  $(folder).addEventListener('change', () => {
+    // webkitRelativePath keeps the folder structure: "The Sopranos/Season 1/episode 03.mkv"
+    set([...$(folder).files].map((f) => ({ file: f, path: f.webkitRelativePath || f.name })));
+    $(folder).value = '';
+  });
+
+  const zone = $(drop);
+  ['dragenter', 'dragover'].forEach((type) => zone.addEventListener(type, (e) => {
+    e.preventDefault();
+    zone.classList.add('dropping');
+  }));
+  ['dragleave', 'drop'].forEach((type) => zone.addEventListener(type, () => zone.classList.remove('dropping')));
+  zone.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    const items = [...(e.dataTransfer.items || [])];
+    try {
+      const entries = items.map((i) => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null)).filter(Boolean);
+      const found = entries.length
+        ? (await Promise.all(entries.map((entry) => readEntry(entry)))).flat()
+        : [...e.dataTransfer.files].map((f) => ({ file: f, path: f.name }));
+      set(found);
+    } catch (err) {
+      SMT.showError(`Could not read the dropped files: ${err.message}`);
+    }
+  });
+
+  $(button).addEventListener('click', async () => {
+    const chosen = state.files.filter((e) => e.selected);
+    if (!chosen.length) return;
+    const go = $(button);
+    go.disabled = true;
+    const { diarize, denoise, clone } = options();
+    let failed = 0;
+    for (const [i, entry] of chosen.entries()) {
+      const what = chosen.length > 1 ? `${i + 1} of ${chosen.length}: ${entry.path}` : entry.path;
+      const ok = await uploadTake(entry.file, entry.file.name, diarize, denoise, entry.path, what, $(status), clone);
+      if (ok) entry.selected = false; else failed += 1;
+      render();
+      go.disabled = true;
+    }
+    state.files = state.files.filter((e) => e.selected);  // keep the failed ones to retry
+    render();
+    $(status).textContent = failed
+      ? `${failed} file${failed === 1 ? '' : 's'} could not be uploaded (still listed above to retry).`
+      : (chosen.length > 1 ? `All ${chosen.length} files uploaded. They're processed one at a time.` : '');
+  });
+
+  return { set, render, state };
+}
+
+makeImporter({
+  list: '#import-list', button: '#free-upload-btn', file: '#free-file', folder: '#free-folder',
+  folderBtn: '#free-folder-btn', drop: '#file-mode', status: '#free-upload-status',
+  label: (n) => (n > 1 ? `Import ${n} files` : 'Import'),
+  options: () => ({ diarize: $('#free-diarize').checked, denoise: $('#file-denoise').value }),
+  picked: (files) => {
+    // Videos usually have several speakers (and a soundtrack)
+    if (files.some((e) => VIDEO_FILE.test(e.path) || e.file.type.startsWith('video/'))) {
+      $('#free-diarize').checked = true;
+      $('#file-denoise').value = 'strong';
+    }
+  },
 });
 
-$('#free-upload-btn').addEventListener('click', async () => {
-  const chosen = importFiles.filter((e) => e.selected);
-  if (!chosen.length) return;
-  const button = $('#free-upload-btn');
-  button.disabled = true;
-  const diarize = $('#free-diarize').checked;
-  const denoise = $('#file-denoise').value;
-  let failed = 0;
-  for (const [i, entry] of chosen.entries()) {
-    const label = chosen.length > 1 ? `${i + 1} of ${chosen.length}: ${entry.path}` : entry.path;
-    const ok = await uploadTake(entry.file, entry.file.name, diarize, denoise, entry.path, label);
-    if (ok) entry.selected = false; else failed += 1;
-    renderImportList();
-    button.disabled = true;
-  }
-  importFiles = importFiles.filter((e) => e.selected);  // keep the failed ones to retry
-  renderImportList();
-  $('#free-file').value = '';
-  $('#free-folder').value = '';
-  $('#free-upload-status').textContent = failed
-    ? `${failed} file${failed === 1 ? '' : 's'} could not be imported (still listed above to retry).`
-    : (chosen.length > 1 ? `All ${chosen.length} files uploaded. They're processed one at a time, below.` : '');
+// Character clone: always several speakers; the AI then says who says what
+makeImporter({
+  list: '#clone-list', button: '#clone-upload-btn', file: '#clone-file', fileBtn: '#clone-file-btn', folder: '#clone-folder',
+  folderBtn: '#clone-folder-btn', drop: '#clone-mode', status: '#clone-status',
+  label: (n) => (n > 1 ? `Add ${n} files` : 'Add'),
+  options: () => ({ diarize: true, denoise: $('#clone-denoise').value, clone: true }),
 });
 
-function uploadTake(blob, filename, diarize, denoise, originalName = '', label = '') {
+function uploadTake(blob, filename, diarize, denoise, originalName = '', label = '', status = $('#free-upload-status'), clone = false) {
   const form = new FormData();
   form.set('audio', blob, filename);
   form.set('denoise', denoise);
   form.set('diarize', diarize ? 'true' : 'false');
   form.set('mic', micLabel || '');
   form.set('original_name', originalName);
-  const status = $('#free-upload-status');
+  form.set('clone', clone ? 'true' : 'false');
   const what = label ? `Uploading ${label}` : 'Uploading';
   status.textContent = label ? `${what}…` : '';
   // XHR (not fetch) for upload progress: a movie can take a while to send
@@ -699,6 +738,12 @@ async function loadPeople() {
   const ids = new Set(people.people.map((p) => p.id));
   peopleUi.selected.forEach((id) => { if (!ids.has(id)) peopleUi.selected.delete(id); });
   renderPeople();
+  renderClone();
+  // New files read by the AI: the open character's review picks up their clips (ticks and edits stay)
+  const current = (peopleUi.characters || []).find((c) => c.name === charUi.name);
+  const sig = current ? `${current.confirmed}/${current.possible}/${current.files}` : '';
+  if (charUi.name && charUi.data && current && charUi.sig && sig !== charUi.sig) openCharacter(charUi.name, true);
+  if (current) charUi.sig = sig;
 }
 
 async function updatePerson(person, change) {
@@ -912,11 +957,7 @@ function aiLine(person) {
 function identifyBar() {
   const info = people.identify || {};
   const bar = el('div', { className: 'identify-bar' });
-  if (!info.enabled || !info.connected) {
-    bar.append(el('span', { className: 'hint' }, 'Let AI work out who says each line (e.g. the characters of a series): ',
-      el('a', { href: '../#settings', target: '_top', textContent: info.connected ? 'turn on Speaker identification in Settings' : 'add an AI connection and turn on Speaker identification in Settings' })));
-    return bar;
-  }
+  if (!info.connected) return bar;  // the Character clone banner says what's missing
   // Only the server knows if a run is going (a saved "running" is left over from a restart)
   const running = Boolean(info.running);
   const go = el('button', {
@@ -1032,17 +1073,15 @@ function characterGroup(group) {
 function renderPeople() {
   const box = $('#people-panel');
   box.innerHTML = '';
-  const list = people.people.filter((p) => p.takes.length);
-  show(box, list.length > 0);
-  if (!list.length) return;
+  // Import file: the people in those files (Character clone files are reviewed per character instead)
+  const importIds = new Set(lastTakes.filter((t) => !isCloneTake(t)).map((t) => t.id));
+  const list = people.people.filter((p) => p.takes.some((id) => importIds.has(id)));
+  show(box, list.length > 0 && recordMode !== 'clone');
+  if (!list.length || recordMode === 'clone') return;
 
-  const multi = lastTakes.filter((t) => t.speakers).length > 1;
+  const multi = lastTakes.filter((t) => t.speakers && !isCloneTake(t)).length > 1;
   const suggestions = list.filter((p) => (p.similar || []).length).length;
-  box.append(identifyBar());
-  const chars = peopleUi.characters || [];
-  if (chars.length) box.append(characterList(chars));
-  // With characters, the voice cards are the detail behind them: folded away
-  const host = chars.length ? el('div', { className: 'people-cards' }) : box;
+  const host = box;
   host.append(el('div', { className: 'people-head' },
     el('strong', { textContent: `People in your files (${list.length})` }),
     el('span', {
@@ -1226,18 +1265,68 @@ function renderPeople() {
         el('span', { className: 'hint', textContent: 'Review the clips in each file below first; your edits and unticks are kept.' }), saveAll));
     }
   }
-  if (chars.length) {
-    const details = el('details', { className: 'voice-cards' },
-      el('summary', { textContent: `Voice cards (${list.length}): the voice groups behind the characters, for renaming and merging by hand` }),
-      host);
-    details.open = Boolean(peopleUi.cardsOpen);
-    details.addEventListener('toggle', () => { peopleUi.cardsOpen = details.open; });
-    box.append(details);
-  }
 }
 
 // ---------------------------------------------------------------------------
-// Characters: who says what, from the AI reading every transcript line
+// Character clone: files -> speakers -> AI reads who says each line -> pick a character -> review
+
+/** A Character clone file (or one the AI already read before that tab existed). */
+function isCloneTake(take) {
+  return Boolean(take.clone || take.attributed);
+}
+
+/** Each tab lists its own files. */
+function applyTakeFilter() {
+  const clone = recordMode === 'clone';
+  const byId = new Map(lastTakes.map((t) => [t.id, t]));
+  document.querySelectorAll('#free-takes .take').forEach((node) => {
+    const take = byId.get(node.dataset.id);
+    show(node, Boolean(take) && isCloneTake(take) === clone);
+  });
+}
+
+function renderClone() {
+  if (recordMode !== 'clone') return;
+  const info = people.identify || {};
+  const banner = $('#clone-ai');
+  show(banner, !info.connected);
+  banner.innerHTML = '';
+  if (!info.connected) {
+    banner.append('Character clone needs an AI to read the dialogue. ',
+      el('a', { href: '../#settings', target: '_top', textContent: 'Add an AI connection in Settings' }), '.');
+  }
+
+  // Progress over all Character clone files
+  const takes = lastTakes.filter(isCloneTake);
+  const progress = $('#clone-progress');
+  progress.innerHTML = '';
+  show(progress, takes.length > 0);
+  if (takes.length) {
+    const running = takes.filter((t) => t.state === 'running');
+    const count = (f) => takes.filter(f).length;
+    const bits = [
+      `${takes.length} file${takes.length === 1 ? '' : 's'}`,
+      running.length && `${running.length} being prepared (${running[0].name || 'file'}: ${running[0].detail || 'working…'})`,
+      count((t) => t.state === 'choose_track') && `${count((t) => t.state === 'choose_track')} need an audio track choice (below)`,
+      count((t) => t.state === 'error') && `${count((t) => t.state === 'error')} failed (below)`,
+      count((t) => t.state === 'done' && !t.attributed) && `${count((t) => t.state === 'done' && !t.attributed)} waiting for the AI`,
+      count((t) => t.attributed) && `${count((t) => t.attributed)} read by the AI`,
+    ].filter(Boolean);
+    progress.append(el('span', { textContent: bits.join(' · ') }));
+    progress.append(identifyBar());
+  }
+
+  const box = $('#clone-characters');
+  box.innerHTML = '';
+  const chars = peopleUi.characters || [];
+  if (chars.length) box.append(characterList(chars));
+  // Come back to the character picked last time
+  if (!charUi.name && chars.length) {
+    let saved = '';
+    try { saved = localStorage.getItem(`clone:${voice.name}`) || ''; } catch (e) { /* ignore */ }
+    if (chars.some((c) => c.name === saved)) openCharacter(saved);
+  }
+}
 
 /** Chips for every character the AI found; click one to review their clips. */
 function characterList(chars) {
@@ -1261,12 +1350,13 @@ const charUi = { name: null, data: null, keep: new Map(), text: new Map(), open:
 async function openCharacter(name, keepChoices = false) {
   const panel = $('#character-panel');
   if (!keepChoices) {
-    Object.assign(charUi, { name, data: null, keep: new Map(), text: new Map(), open: new Set() });
+    Object.assign(charUi, { name, data: null, keep: new Map(), text: new Map(), open: new Set(), sig: '' });
     panel.innerHTML = '';
     panel.append(el('p', { className: 'hint', textContent: `Loading ${name}'s clips…` }));
+    try { localStorage.setItem(`clone:${voice.name}`, name); } catch (e) { /* ignore */ }
   }
   show(panel, true);
-  renderPeople();
+  renderClone();
   try {
     charUi.data = await api(voiceUrl(`/characters/clips?character=${encodeURIComponent(name)}`));
   } catch (err) {
@@ -1281,8 +1371,9 @@ async function openCharacter(name, keepChoices = false) {
 
 function closeCharacter() {
   charUi.name = null;
+  try { localStorage.removeItem(`clone:${voice.name}`); } catch (e) { /* ignore */ }
   show($('#character-panel'), false);
-  renderPeople();
+  renderClone();
 }
 
 const clipKey = (clip) => `${clip.take}:${clip.index}`;
@@ -1329,15 +1420,13 @@ function renderCharacter() {
       const id = `${possibleSection ? 'p' : 'c'}:${fileClips[0].take}`;
       const details = el('details', { className: 'char-file' });
       if (charUi.open.has(id) || (!possibleSection && i === 0 && !charUi.open.size)) details.open = true;
-      const n = fileClips.filter((c) => !c.saved && ticked(c)).length;
-      details.append(el('summary', { textContent: `${fileClips[0].file} · ${n} of ${fileClips.length} ticked` }));
+      details.append(el('summary', { textContent: fileSummary(fileClips, ticked) }));
       const fill = () => {
         if (details.dataset.filled) return;
         details.dataset.filled = '1';
         const list = el('div', { className: 'clips' });
         fileClips.forEach((clip) => list.append(characterClipRow(clip, ticked, () => {
-          details.querySelector('summary').textContent =
-            `${clip.file} · ${fileClips.filter((c) => !c.saved && ticked(c)).length} of ${fileClips.length} ticked`;
+          details.querySelector('summary').textContent = fileSummary(fileClips, ticked);
           updateSave();
         })));
         details.append(list);
@@ -1376,10 +1465,19 @@ function renderCharacter() {
   updateSave();
 }
 
+/** "S01E03.mkv · 12 clips · 5 saved · 4 ticked" */
+function fileSummary(clips, ticked) {
+  const saved = clips.filter((c) => c.saved).length;
+  const n = clips.filter((c) => !c.saved && ticked(c)).length;
+  return [clips[0].file, `${clips.length} clip${clips.length === 1 ? '' : 's'}`, saved && `${saved} saved`,
+    `${n} ticked`].filter(Boolean).join(' · ');
+}
+
 function characterClipRow(clip, ticked, changed) {
   const key = clipKey(clip);
-  const row = el('div', { className: `clip${ticked(clip) && !clip.saved ? '' : ' skipped'}` });
-  const keep = el('input', { type: 'checkbox', checked: ticked(clip) && !clip.saved, disabled: clip.saved,
+  // Saved clips stay in the list, coloured, so you can see what's already in the dataset
+  const row = el('div', { className: `clip${clip.saved ? ' clip--saved' : ticked(clip) ? '' : ' skipped'}` });
+  const keep = el('input', { type: 'checkbox', checked: clip.saved || ticked(clip), disabled: clip.saved,
     title: clip.saved ? 'Already in the dataset' : 'Save this clip' });
   keep.addEventListener('change', () => {
     charUi.keep.set(key, keep.checked);
@@ -1391,7 +1489,7 @@ function characterClipRow(clip, ticked, changed) {
   const text = el('input', { type: 'text', value: charUi.text.get(key) ?? clip.text, disabled: clip.saved });
   text.addEventListener('input', () => charUi.text.set(key, text.value));
   row.append(keep, play, text,
-    el('span', { className: 'dur', textContent: clip.saved ? 'saved' : `${(clip.end - clip.start).toFixed(1)}s`,
+    el('span', { className: 'dur', textContent: clip.saved ? '✓ saved' : `${(clip.end - clip.start).toFixed(1)}s`,
       title: `at ${clock(clip.start)} in ${clip.file}` }));
   if (!clip.reason) return row;
   return el('div', { className: 'clip-with-reason' }, row, el('small', { className: 'hint', textContent: clip.reason }));
@@ -1409,7 +1507,7 @@ async function loadTakes() {
   }
   if (!voice || voice.name !== name) return;
   lastTakes = takes;
-  if (takes.some((t) => t.speakers)) await loadPeople(); else { people = { people: [], target: null }; renderPeople(); }
+  await loadPeople();  // also tells whether an AI is connected (Character clone)
 
   const box = $('#free-takes');
   const ids = new Set(takes.map((t) => t.id));
@@ -1423,7 +1521,9 @@ async function loadTakes() {
     if (existing) existing.replaceWith(node); else box.append(node);
     renderedTakes[take.id] = takeKey(take);
   });
-  if (recordMode === 'prompts' && takes.some((t) => ['done', 'choose_track'].includes(t.state))) {
+  applyTakeFilter();
+  renderClone();
+  if (recordMode === 'prompts' && takes.some((t) => ['done', 'choose_track'].includes(t.state) && !isCloneTake(t))) {
     // Something is waiting for review: show it where it came from
     setMode(takes.some((t) => t.tracks && t.source && !/^source\.(webm|ogg|m4a)$/.test(t.source)) ? 'file' : 'free');
   }
@@ -1436,15 +1536,12 @@ async function loadTakes() {
 let pendingClips = 0;
 let pendingTakes = 0;
 /** Multi-speaker files are reviewed per character (AI identification is on). */
-function characterReview() {
-  return Boolean(people.identify?.enabled && people.identify?.connected);
-}
-
-const takeKey = (take) => `${take.state}${take.attributed ? ':ai' : ''}${take.speakers && characterReview() ? ':chars' : ''}`;
+const takeKey = (take) => `${take.state}${take.attributed ? ':ai' : ''}`;
 
 function updatePending(takes) {
+  // Character clone files are reviewed per character: never "waiting" here
   const waiting = takes.filter((t) => ['done', 'choose_track', 'running'].includes(t.state)
-    && !(t.state === 'done' && t.speakers && characterReview()));
+    && !(t.state === 'done' && isCloneTake(t)));
   pendingTakes = waiting.length;
   pendingClips = waiting.reduce((sum, t) => sum + (t.state === 'done' ? t.segments.length : 0), 0);
   const what = pendingClips
@@ -1562,7 +1659,7 @@ function renderTake(take) {
     return box;
   }
   // Several speakers and AI identification on: clips are reviewed per character, not per file
-  if (take.state === 'done' && take.speakers && characterReview()) {
+  if (take.state === 'done' && isCloneTake(take)) {
     box.classList.add('take--compact');
     head.append(take.attributed
       ? el('span', { className: 'pill pill--ok', textContent: 'Lines identified', title: 'Pick a character above to review their clips' })

@@ -44,7 +44,7 @@ def voice(tmp_path, monkeypatch):
     }
     for take_id, take in takes.items():
         (tmp_path / "freeform" / take_id).mkdir(parents=True)
-        freeform._write(tmp_path / "freeform" / take_id, {"state": "done", "denoise": "off", **take})
+        freeform._write(tmp_path / "freeform" / take_id, {"state": "done", "denoise": "off", "clone": True, **take})
     people = [
         {"id": "p1", "name": "Person 1", "centroid": TONY, "seconds": 10.0, "takes": ["t1", "t2"], "sample": None},
         {"id": "p2", "name": "Person 2", "centroid": CARMELA, "seconds": 4.0, "takes": ["t1", "t2"], "sample": None},

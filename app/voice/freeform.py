@@ -363,7 +363,7 @@ def new_take(voice: Voice, filename: str) -> Path:
 
 
 def start(voice: Voice, source: Path, denoise: Any = "light", diarize: bool = False,
-          name: str = "") -> Dict[str, Any]:
+          name: str = "", clone: bool = False) -> Dict[str, Any]:
     """Check the upload, then transcribe (and optionally diarize) it in the background.
 
     Files with several audio tracks wait in state "choose_track" (see choose_track)."""
@@ -394,6 +394,7 @@ def start(voice: Voice, source: Path, denoise: Any = "light", diarize: bool = Fa
         "source": source.name, "size": size, "name": " ".join(str(name).split())[:200],
         "tracks": tracks, "track": recommended, "dialogue": tracks[recommended]["surround"],
         "tags": file_tags(source),
+        "clone": bool(clone),  # Character clone: reviewed per character, not per file
     }
     _LOGGER.info("Freeform take %s/%s uploaded: %s (%.1f MB), %d audio track(s)",
                  voice.name, take_id, source.name, size / 2**20, len(tracks))
@@ -487,8 +488,8 @@ def _begin(voice: Voice, take_dir: Path, take: Dict[str, Any]) -> Dict[str, Any]
             if take_dir.exists():
                 _write(take_dir, take)
             _live.pop(take_id, None)
-        if take.get("state") == "done" and take.get("speakers"):
-            identify.after_take(voice)  # who says each line, with AI, if enabled
+        if take.get("state") == "done" and take.get("speakers") and take.get("clone"):
+            identify.after_take(voice)  # Character clone: who says each line, with AI
 
     asyncio.create_task(run())
     return _public(take_id, take)
@@ -584,6 +585,7 @@ def save_clips(voice: Voice, clips: List[Dict[str, Any]]) -> int:
                 continue
             voice.save_recording(GROUP, f"{take_id}_{index:04d}", text, clip_wav(voice, take_id, index), ".wav")
             segments[index]["saved"] = True
+            segments[index]["savedText"] = text  # as corrected in the review
             saved += 1
         _write(take_dir, take)
     _LOGGER.info("Voice %s: saved %d clips from %d files as recordings", voice.name, saved, len(by_take))

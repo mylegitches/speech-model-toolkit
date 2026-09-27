@@ -71,6 +71,7 @@
         <button type="button" class="mode-btn active" data-mode="prompts" role="tab">Read sentences</button>
         <button type="button" class="mode-btn" data-mode="free" role="tab">Speak freely</button>
         <button type="button" class="mode-btn" data-mode="file" role="tab">Import file</button>
+        <button type="button" class="mode-btn" data-mode="clone" role="tab">Character clone</button>
       </div>
 
       <div id="mic-block" class="mode-panel">
@@ -148,9 +149,35 @@
         </details>
       </div>
 
+      <div id="clone-mode" class="mode-panel hidden">
+        <p class="hint">Clone a character from a TV show or film. Add an episode, a season folder or a whole series (drag them here, or use the buttons). Each file is transcribed and split into voices, and the AI reads the dialogue to work out who says every line. Then pick a character and review their clips. Add more episodes any time: your character stays selected and the new clips appear in the review. Only use recordings of people who agreed to have their voice cloned.</p>
+        <div id="clone-ai" class="banner banner--warning hidden"></div>
+        <div class="row">
+          <button type="button" id="clone-file-btn" class="btn btn--secondary">🎬 Add episodes</button>
+          <button type="button" id="clone-folder-btn" class="btn btn--secondary">📁 Add a season or series folder</button>
+          <label class="inline-select">Background noise
+            <select id="clone-denoise">
+              <option value="off">Keep as is</option>
+              <option value="light">Reduce (hiss, hum)</option>
+              <option value="strong" selected>Remove (music, effects)</option>
+            </select>
+          </label>
+          <input type="file" id="clone-file" class="hidden" multiple
+                 accept="audio/*,video/*,.mkv,.mp4,.m4v,.avi,.mov,.wmv,.flv,.webm,.ts,.m2ts,.mts,.mpg,.mpeg,.vob,.3gp,.ogv,.mp3,.wav,.flac,.ogg,.opus,.m4a,.m4b,.aac,.ac3,.eac3,.dts,.wma,.aiff,.aif" />
+          <input type="file" id="clone-folder" class="hidden" webkitdirectory directory multiple />
+        </div>
+        <div id="clone-list" class="import-list hidden"></div>
+        <div class="row">
+          <button id="clone-upload-btn" class="btn btn--primary" disabled>Add</button>
+        </div>
+        <p id="clone-status" class="hint"></p>
+        <div id="clone-progress" class="clone-progress hidden"></div>
+        <div id="clone-characters"></div>
+        <div id="character-panel" class="people-panel hidden"></div>
+      </div>
+
       <div id="takes-block" class="mode-panel hidden">
         <div id="people-panel" class="people-panel hidden"></div>
-        <div id="character-panel" class="people-panel hidden"></div>
         <div id="free-takes" class="free-takes"></div>
         <audio id="clip-audio" class="hidden"></audio>
       </div>
