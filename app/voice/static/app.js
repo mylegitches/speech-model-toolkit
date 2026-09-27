@@ -1974,7 +1974,10 @@ $('#checkpoint-select').addEventListener('change', () => {
 let matchState = null;   // GET api/voices/{name}/match
 let matchTimer = null;
 
+let startListOpen = false;  // the pretrained voices, when Auto-detect is chosen
+
 function chooseStart(value) {
+  if (value === 'auto') startListOpen = false;  // Auto-detect: the other choices fold away
   $('#checkpoint-select').value = value;
   show($('#checkpoint-input'), false);
   renderStartOptions();
@@ -2046,6 +2049,19 @@ function renderStartOptions() {
   const auto = startRow('auto', 'Auto-detect (recommended)', matchSummary(), [findBtn]);
   auto.classList.add('auto');
   box.append(auto);
+
+  // With Auto-detect, the pretrained voices stay folded until asked for
+  if ($('#checkpoint-select').value === 'auto') {
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'btn btn--ghost start-toggle';
+    toggle.textContent = startListOpen
+      ? 'Hide the voices ▴'
+      : `Choose a voice myself (${voice.startingVoices.length} voices, ▶ to hear them) ▾`;
+    toggle.addEventListener('click', (e) => { e.preventDefault(); startListOpen = !startListOpen; renderStartOptions(); });
+    box.append(toggle);
+    if (!startListOpen) return;
+  }
 
   const results = matchState?.match?.results || [];
   const scores = Object.fromEntries(results.map((r) => [r.url, r.score]));

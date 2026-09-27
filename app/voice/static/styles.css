@@ -71,6 +71,7 @@
 
 /* Starting voice picker */
 .start-voice { display: flex; flex-direction: column; gap: 0.6rem; }
+.start-toggle { align-self: flex-start; font-size: 0.85rem; }
 .start-options { display: flex; flex-direction: column; gap: 0.4rem; }
 .start-option {
   display: flex; flex-direction: row; align-items: center; gap: 0.7rem;

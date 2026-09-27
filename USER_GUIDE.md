@@ -163,7 +163,7 @@ Then click **✓ Save N clips to the dataset** (at the top or bottom of the list
 
 **3. Train** fine-tunes a pretrained voice on your dataset.
 
-1. **Starting voice:** leave **Auto-detect (recommended)** selected. When training starts it compares your clips with every pretrained voice for your language and starts from the one that sounds most like you.
+1. **Starting voice:** leave **Auto-detect (recommended)** selected. When training starts it compares your clips with every pretrained voice for your language and starts from the one that sounds most like you. With Auto-detect selected the other voices are folded away; **Choose a voice myself** shows them (▶ to hear each one), and picking Auto-detect again folds them back.
    - Click **Find match** to see the ranking first (each voice gets a similarity %).
    - Click **▶** next to any voice to hear it, and select one yourself if you prefer.
 2. **Pick how long to train:**
