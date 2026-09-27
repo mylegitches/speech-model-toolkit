@@ -471,8 +471,6 @@ def _begin(voice: Voice, take_dir: Path, take: Dict[str, Any]) -> Dict[str, Any]
                         people.link(voice, take_id, take)
                     except Exception:  # matching across files is a bonus, never fatal
                         _LOGGER.exception("Matching the speakers of %s/%s to known people failed", voice.name, take_id)
-                    else:
-                        identify.after_take(voice)  # name the new people with AI, if enabled
             take.update(state="done", detail="")
             _LOGGER.info("Freeform take %s/%s done in %.0fs: %.0fs of audio, %d clips%s",
                          voice.name, take_id, time.monotonic() - started, take["duration"] or 0,
@@ -489,6 +487,8 @@ def _begin(voice: Voice, take_dir: Path, take: Dict[str, Any]) -> Dict[str, Any]
             if take_dir.exists():
                 _write(take_dir, take)
             _live.pop(take_id, None)
+        if take.get("state") == "done" and take.get("speakers"):
+            identify.after_take(voice)  # who says each line, with AI, if enabled
 
     asyncio.create_task(run())
     return _public(take_id, take)
@@ -561,6 +561,32 @@ def save(voice: Voice, take_id: str, keep: List[Dict[str, Any]]) -> int:
         saved += 1
     _LOGGER.info("Freeform take %s/%s: saved %d of %d clips as recordings", voice.name, take_id, saved, len(segments))
     discard(voice, take_id)
+    return saved
+
+
+def save_clips(voice: Voice, clips: List[Dict[str, Any]]) -> int:
+    """Save clips picked across files (one character's) as recordings. The files stay,
+    so other characters' clips can still be picked; saved clips are marked."""
+    by_take: Dict[str, List[Dict[str, Any]]] = {}
+    for clip in clips:
+        by_take.setdefault(str(clip.get("take", "")), []).append(clip)
+    saved = 0
+    for take_id, items in by_take.items():
+        take_dir = _take_dir(voice, take_id)
+        if take_id in _live:
+            raise RuntimeError("That file is still being processed; wait for it to finish")
+        take = _read(take_dir)
+        segments = take["segments"]
+        for item in items:
+            index = int(item.get("index", -1))
+            text = " ".join(str(item.get("text", "")).split())
+            if not 0 <= index < len(segments) or not text:
+                continue
+            voice.save_recording(GROUP, f"{take_id}_{index:04d}", text, clip_wav(voice, take_id, index), ".wav")
+            segments[index]["saved"] = True
+            saved += 1
+        _write(take_dir, take)
+    _LOGGER.info("Voice %s: saved %d clips from %d files as recordings", voice.name, saved, len(by_take))
     return saved
 
 

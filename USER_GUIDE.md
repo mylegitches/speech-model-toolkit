@@ -126,16 +126,14 @@ Every file is compared with the people found in your earlier files, so the same 
 - With many people, **Find a person…** searches by name, and people with little speech are behind **Show all**.
 - **▶** plays one of their clips.
 
-**Let AI name them (optional).** With an AI connection and **Speaker identification** turned on in Settings, the AI reads a few lines each person said and works out who they are, for a whole series too:
+**Let AI work out who says what (optional).** With an AI connection and **Speaker identification** turned on in Settings, the AI reads each imported file's transcript like a script and says who speaks every line:
 
-- It looks up the cast on TVmaze. Put the show in a folder named after it (`The Sopranos/Season 1/S01E01.mkv`), name the episodes after it (`The.Sopranos.S01E01.720p.mkv`), or include the IMDb ID in a file name (`… tt0141842.mkv`). Folders like *Season 1* or *Disc 2* are ignored.
-- It also reads the files' own metadata (title, show, episode, IMDb ID), which many ripped or downloaded files carry, so a folder called just *Season 01* is fine.
-- With **web search** on and a provider that supports it (OpenRouter, Perplexity, Gemini, Anthropic, OpenAI search models), the AI searches distinctive lines word for word (transcript, subtitle and quote sites) to find the show, the episode and who says them, and cross-checks with the file names, metadata, timestamps and cast.
-- If nothing names the show, the AI may still recognise it from the dialogue; the toolkit then fetches that show's cast and asks once more, and remembers the show for later files.
-- Each card then shows its answer, e.g. *AI: Carmela Soprano (Edie Falco) · high*; hover for the reason, and **Use this name** to accept it.
-- With **Name cards automatically**, "Person N" cards get the name when the AI is sure. Names you typed are never changed.
-- With **Merge cards automatically**, two cards the AI is sure are the same character are merged, but only if their voices are also somewhat alike. Otherwise they show up as *Maybe the same as …: AI thinks both are …* for you to decide.
-- It runs after every imported file. **🔎 Identify with AI** asks about the people it hasn't identified yet; Shift-click asks about everyone again.
+1. **Import** the episodes or movie with **Several people talking** ticked. Each file is transcribed and split into voices.
+2. **The AI attributes every line**, in order, using who is addressed and who replies, the voice groups, the show's cast (from TVmaze: name the show's folder, e.g. `The Sopranos/Season 1/…`, name the files `The.Sopranos.S01E01…`, or keep the IMDb ID `tt…` in the name; file metadata works too) and, with **web search** on a provider that supports it, looking lines up online. A line is **confirmed** when the AI is sure *and* the line's voice agrees with the rest of that character's lines in the file.
+3. **Pick a character** from the list at the top of the People panel (e.g. *Tony Soprano · 640 ✓ · 172 ?*).
+4. **Review their clips** across all files: **Confirmed** clips are ticked, **Possible** ones (the AI is less sure, or the voice doesn't match) are not, each with the reason. ▶ to listen, fix words, untick music, shouting, whispering or other voices, then **Save N ticked clips to the dataset**. The files stay, so you can come back for more (saved clips are marked).
+
+It runs after every imported file; **🔎 Identify with AI** does the files not done yet (Shift-click: all of them again). The voice cards behind the characters are under **Voice cards** for renaming and merging by hand.
 
 Once the person you want is marked, review the clips of each file, then use **✓ Save *name*'s clips from all files** to add all of them to the dataset at once. Unticked clips stay out.
 

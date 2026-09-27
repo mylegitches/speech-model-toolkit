@@ -1,17 +1,23 @@
-"""Name the people found in imported files with the active AI connection.
+"""Who says each line: the AI reads imported files' transcripts like a script.
 
-For each person (speakers.py) the AI gets a few of their transcribed lines and
-the files they appear in, plus - when the file names carry an IMDb ID
-("tt0141842") or sit in a show's folder ("The Sopranos/Season 1/...") - the
-show's cast from TVmaze (free, no key; TVmaze links shows to their IMDb IDs).
-It answers who each person is, with a confidence. Then:
+For every imported file with speaker detection, the active AI connection gets
+the transcript in order, in parts of CHUNK lines ("L12 [12:41] B: ..."), with
+the voice groups speaker detection found (A, B, C...), what earlier files tell
+about those voices, the show's cast from TVmaze (found from an IMDb ID
+"tt0141842", the show's folder or file names, or file metadata; free, no key)
+and, where the provider can, web search to look lines up. It answers who says
+each line, with a confidence. Then:
 
-  - every card shows the AI's answer, with "Use this name"
-  - two cards the AI names as the same character are suggested for merging
-  - with "autoName", untouched "Person N" cards get the name when the AI is sure
-  - with "autoMerge", cards the AI is sure are one character are merged when
-    their voices are also at least somewhat alike (so a wrong guess can't merge
-    two clearly different voices)
+  - a line is "confirmed" when the AI is sure and its voice group agrees (most
+    of that group's lines are the same character); other lines the AI gives to
+    a character, and unclear lines in a voice group that is mostly one
+    character, are "possible" for the user to check
+  - characters() lists every character with their clips; character_clips()
+    returns one character's confirmed and possible clips across all files
+  - the people cards (speakers.py) get the character most of their lines
+    belong to; with "autoName" untouched "Person N" cards are renamed, with
+    "autoMerge" cards that are clearly one character are merged when their
+    voices are also somewhat alike
 
 Runs after each diarized file (when enabled in Settings) and on demand.
 """
@@ -21,10 +27,10 @@ import json
 import logging
 import re
 import time
+from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
-import numpy as np
 
 from ..settings import providers
 from ..settings import store as settings_store
@@ -33,14 +39,14 @@ from .voices import Voice
 
 _LOGGER = logging.getLogger(__name__)
 
-MAX_PEOPLE = 600         # per run, those with the most speech first
-BATCH = 25               # people per AI request
-REQUEST_TIMEOUT = 300    # seconds; writing answers for a whole group takes a while
-LINES_PER_PERSON = 8
+CHUNK = 120              # transcript lines per AI request
+CONTEXT = 8              # earlier lines (with their answers) repeated for continuity
+REQUEST_TIMEOUT = 300    # seconds per request
 MAX_TOKENS = 8000        # reply budget (reasoning + search + the JSON); most models allow 8k
 RETRY_MAX_TOKENS = 16000  # once more with this when the model ran out before answering
 AUTO_MERGE_MIN_VOICE = 0.25
-"""Voice similarity two cards need before the AI's "same character" merges them."""
+"""Voice similarity two cards need before being one character merges them."""
+GROUP_MAJORITY = 0.5     # share of a voice group's lines a character needs to "own" the group
 
 TVMAZE = "https://api.tvmaze.com"
 _IMDB_ID = re.compile(r"\btt\d{7,9}\b")
@@ -53,19 +59,17 @@ _GENERIC_FOLDER = re.compile(
 )
 
 SYSTEM = (
-    "You identify who is speaking in transcribed dialogue from TV series and films. "
-    "Each numbered person is one voice that was grouped automatically, so a person may occasionally "
-    "include a few lines from someone else. Use the cast list, the file names and metadata, the "
-    "dialogue (names people call each other) and your knowledge. Answer with JSON only, no other text."
+    "You attribute the lines of a TV or film transcript to the characters who speak them. "
+    "The transcript is machine-made: words may be slightly off, and the voice groups (A, B, C...) come "
+    "from automatic speaker detection, which is usually right but sometimes mixes two people or splits one. "
+    "Use who is addressed and named, who replies to whom, the voice groups, the cast list and your "
+    "knowledge of the episode. Answer with JSON only, no other text."
 )
 SEARCH_HINT = (
-    "You can search the web: search a few of the most distinctive lines word for word, in quotes "
-    "(episode transcripts, subtitle and quote sites), to find which show and episode they are from "
-    "and which character says them, and check it against the file names, metadata, timestamps and cast. "
-    "The lines are machine transcriptions, so a word may be slightly off: if an exact search finds "
-    "nothing, try a shorter part of the line."
+    "You can search the web: look up a few distinctive lines word for word, in quotes (episode "
+    "transcripts, subtitle and quote sites), to confirm who says them. If an exact search finds nothing, "
+    "try a shorter part of the line."
 )
-_NAME_WORD = re.compile(r"(?<=[a-z,] )[A-Z][a-z]+")
 
 _running: Set[str] = set()
 _again: Set[str] = set()
@@ -166,7 +170,7 @@ async def cast_lookup(files: List[str], tags: Optional[Dict[str, Dict[str, str]]
         return f"{show.get('name')} ({(show.get('premiered') or '')[:4]})", cast
 
 
-# ---- Asking the AI ------------------------------------------------------------------
+# ---- The transcript, as the AI sees it ------------------------------------------------
 
 
 def _clock(seconds: Optional[float]) -> str:
@@ -176,115 +180,177 @@ def _clock(seconds: Optional[float]) -> str:
     return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
 
 
-def _distinctive(lines: List[Dict[str, Any]], count: int = LINES_PER_PERSON) -> List[Dict[str, Any]]:
-    """The lines most worth searching: long, with names in them, from different files."""
-    def score(line: Dict[str, Any]) -> float:
-        text = line["text"]
-        return min(len(text), 120) + 25 * len(_NAME_WORD.findall(text)) - (40 if len(text.split()) < 5 else 0)
-
-    unique: Dict[str, Dict[str, Any]] = {}
-    for line in lines:  # the same line in several files: once is enough
-        unique.setdefault(re.sub(r"\W+", " ", line["text"].lower()).strip(), line)
-    ranked = sorted(unique.values(), key=score, reverse=True)
-    picked, seen_files = [], set()
-    for line in ranked:  # one per file first, then the rest
-        if line.get("file") not in seen_files:
-            picked.append(line)
-            seen_files.add(line.get("file"))
-    picked += [line for line in ranked if line not in picked]
-    return picked[:count]
+def _letters(take: Dict[str, Any]) -> Dict[int, str]:
+    """Voice groups as letters, the one that talks most first: {speaker id: "A"}."""
+    order = sorted(take.get("speakers") or [], key=lambda s: -(s.get("seconds") or 0))
+    names = {}
+    for n, speaker in enumerate(order):
+        names[speaker["id"]] = chr(65 + n) if n < 26 else f"Z{n - 25}"
+    return names
 
 
-def _prompt(people: List[Dict[str, Any]], named: List[Dict[str, Any]], files: List[str],
-            show: str, cast: List[str], tags: Optional[Dict[str, Dict[str, str]]] = None,
-            web_search: bool = False) -> str:
-    tags = tags or {}
+def _line(n: int, segment: Dict[str, Any], letters: Dict[int, str]) -> str:
+    who = letters.get(segment.get("speaker"), "?")
+    return f"L{n + 1} [{_clock(segment.get('start'))}] {who}: {segment['text'].strip()}"
+
+
+def _group_hints(take: Dict[str, Any], letters: Dict[int, str], people: Dict[str, Dict[str, Any]]) -> List[str]:
+    """What earlier files say about each voice group (through the people cards)."""
+    hints = []
+    counts = Counter(s.get("speaker") for s in take["segments"] if s.get("text"))
+    for speaker in sorted(take.get("speakers") or [], key=lambda s: letters.get(s["id"], "?")):
+        letter = letters.get(speaker["id"], "?")
+        person = people.get(speaker.get("person") or "")
+        note = ""
+        if person and not _DEFAULT_NAME.match(person["name"]):
+            note = f" = {person['name']} (named by the user)"
+        elif person and (person.get("ai") or {}).get("name") and person["ai"].get("confidence") in ("high", "medium"):
+            note = f": in other files mostly {person['ai']['name']}"
+        hints.append(f"{letter} ({counts.get(speaker['id'], 0)} lines){note}")
+    return hints
+
+
+def _prompt(file: str, tags: Dict[str, str], show: str, cast: List[str], hints: List[str],
+            context: List[str], lines: List[str], searching: bool) -> str:
     parts = []
-    if files:
-        rows = []
-        for f in files[:40]:
-            meta = "; ".join(f"{k}: {v}" for k, v in (tags.get(f) or {}).items())
-            rows.append(f"- {f}" + (f"  [metadata: {meta}]" if meta else ""))
-        parts.append("Files these people were found in (up to 40):\n" + "\n".join(rows))
+    meta = "; ".join(f"{k}: {v}" for k, v in tags.items())
+    parts.append(f"File: {file}" + (f"  [metadata: {meta}]" if meta else ""))
     if cast:
         parts.append(f"Cast of {show} (from TVmaze, character (actor); found from the file names or metadata, "
                      "so ignore it if it clearly doesn't fit the dialogue):\n" + "; ".join(cast))
-    if named:
-        parts.append("Already named (by the user: trust these; marked AI: earlier answers, "
-                     "use the same name for the same character):\n" + "\n".join(
-            f'- {p["id"]} = {p["name"]}' for p in named))
-    blocks = []
-    for p in people:
-        lines = "\n".join(
-            f'  - "{line["text"]}"'
-            + (f' ({line["file"]}' + (f' at {_clock(line.get("at"))}' if line.get("at") is not None else "") + ")"
-               if line.get("file") else "")
-            for line in _distinctive(p.get("lines", []))
-        )
-        blocks.append(f'{p["id"]} ({round(p["seconds"] / 60, 1)} min of speech, in {len(p["takes"])} files):\n{lines}')
-    parts.append("People to identify:\n\n" + "\n\n".join(blocks))
-    if web_search:
+    if hints:
+        parts.append("Voice groups in this file:\n" + "\n".join(f"- {h}" for h in hints))
+    if context:
+        parts.append("Just before (already attributed, for context):\n" + "\n".join(context))
+    parts.append("Transcript:\n" + "\n".join(lines))
+    if searching:
         parts.append(SEARCH_HINT)
     parts.append(
-        'For each person above, who is speaking? Reply with JSON only:\n'
+        'Who says each transcript line? Reply with JSON only, one entry per line, in order:\n'
         '{"show": "Show or film title (year), or null", '
-        '"people": [{"id": "p3", "name": "Character name", "actor": "Actor name or null", '
-        '"confidence": "high|medium|low", "reason": "one short sentence, no double quotes"}]}\n'
-        'Use name "mixed" if their lines clearly come from several characters, and null if you '
-        'cannot tell. Give the same name to every person who is the same character.'
+        '"lines": [["L1", "Character name", "high"], ["L2", null, "low"]]}\n'
+        'Confidence is high, medium or low. Use the cast\'s character names exactly, and null when you '
+        'cannot tell who speaks.'
     )
     return "\n\n".join(parts)
 
 
-def _parse(reply: str) -> List[Dict[str, Any]]:
-    return _parse_reply(reply)[1]
+_TRIPLE = re.compile(r'\[\s*"L(\d+)"\s*,\s*(null|"((?:[^"\\]|\\.)*)")\s*,\s*"?(high|medium|low)"?\s*\]', re.IGNORECASE)
 
 
-def _parse_reply(reply: str) -> Tuple[Optional[str], List[Dict[str, Any]]]:
-    """(show the AI recognised or None, answers per person)."""
+def _parse(reply: str) -> Tuple[Optional[str], List[Tuple[int, Optional[str], str]]]:
+    """(show or None, [(line number, character or None, confidence)])."""
     text = reply.strip()
     start, end = text.find("{"), text.rfind("}")
-    if start < 0 or end <= start:
-        raise providers.ProviderError("The AI's answer wasn't JSON. Try another model.")
-    try:
-        data = json.loads(text[start:end + 1])
-    except ValueError as err:
-        # Often one unescaped quote in a "reason": keep every answer that can still be read
-        data = _salvage(text[start:end + 1])
-        if not data["people"]:
-            raise providers.ProviderError(f"The AI's answer wasn't valid JSON ({err}). Try another model.") from err
-        _LOGGER.info("The AI's JSON was broken (%s); recovered %d answers", err, len(data["people"]))
-    show = data.get("show")
-    show = " ".join(show.split())[:120] if isinstance(show, str) and show.strip().lower() not in ("", "null", "unknown") else None
-    return show, [p for p in data.get("people", []) if isinstance(p, dict) and p.get("id")]
-
-
-_OBJECT = re.compile(r'\{[^{}]*?"id"\s*:\s*"(p\d+)"[^{}]*\}')
-
-
-def _field(chunk: str, key: str) -> Optional[str]:
-    m = re.search(rf'"{key}"\s*:\s*(null|"((?:[^"\\]|\\.)*)")', chunk)
-    if not m or m.group(1) == "null":
-        return None
-    try:
-        return json.loads(f'"{m.group(2)}"')
-    except ValueError:
-        return m.group(2)
-
-
-def _salvage(text: str) -> Dict[str, Any]:
-    """Best effort for broken JSON: each person's object on its own, else its fields one by one."""
-    people = []
-    for m in _OBJECT.finditer(text):
+    show = None
+    answers: List[Tuple[int, Optional[str], str]] = []
+    data = None
+    if 0 <= start < end:
         try:
-            people.append(json.loads(m.group(0)))
-            continue
+            data = json.loads(text[start:end + 1])
         except ValueError:
-            pass
-        chunk = m.group(0)
-        people.append({"id": m.group(1), "name": _field(chunk, "name"), "actor": _field(chunk, "actor"),
-                       "confidence": _field(chunk, "confidence") or "low", "reason": ""})
-    return {"show": _field(text[:300], "show"), "people": people}
+            data = None
+    if isinstance(data, dict):
+        raw = data.get("show")
+        if isinstance(raw, str) and raw.strip().lower() not in ("", "null", "unknown"):
+            show = " ".join(raw.split())[:120]
+        for entry in data.get("lines") or []:
+            if isinstance(entry, dict):
+                entry = [entry.get("id") or entry.get("line"), entry.get("name") or entry.get("character"),
+                         entry.get("confidence")]
+            if not isinstance(entry, (list, tuple)) or len(entry) < 2:
+                continue
+            m = re.fullmatch(r"L?(\d+)", str(entry[0]).strip())
+            if not m:
+                continue
+            name = entry[1] if isinstance(entry[1], str) else None
+            conf = str(entry[2]).lower() if len(entry) > 2 else "low"
+            answers.append((int(m.group(1)), name, conf if conf in ("high", "medium", "low") else "low"))
+        return show, answers
+    # Broken JSON (an unescaped quote...): keep every entry that can still be read
+    for m in _TRIPLE.finditer(text):
+        name = None if m.group(2).lower() == "null" else m.group(3)
+        answers.append((int(m.group(1)), name, m.group(4).lower()))
+    if not answers:
+        raise providers.ProviderError("The AI's answer wasn't the JSON asked for. Try another model.")
+    _LOGGER.info("The AI's JSON was broken; recovered %d line answers", len(answers))
+    return show, answers
+
+
+def _canonical(name: Optional[str], cast_names: List[str]) -> Optional[str]:
+    """The cast's spelling of a name the AI gave ("tony" -> "Tony Soprano" when that's the only Tony)."""
+    name = " ".join((name or "").split())
+    if not name or name.lower() in ("null", "none", "unknown", "?", "mixed"):
+        return None
+    lower = {c.lower(): c for c in cast_names}
+    if name.lower() in lower:
+        return lower[name.lower()]
+    first = [c for c in cast_names if c.lower().split()[0] == name.lower()]
+    if len(first) == 1:
+        return first[0]
+    return name[:60]
+
+
+# ---- Takes (freeform.py) ------------------------------------------------------------
+
+
+def _takes(voice: Voice) -> List[Tuple[str, Dict[str, Any]]]:
+    """Imported files with speaker detection that are done: [(take id, take)], by file name."""
+    from . import freeform  # freeform imports this module
+
+    found = []
+    root = freeform._takes_dir(voice)
+    for take_dir in sorted(root.iterdir()) if root.is_dir() else []:
+        if not (take_dir / "take.json").is_file() or take_dir.name in freeform._live:
+            continue
+        try:
+            take = freeform._read(take_dir)
+        except (OSError, ValueError):
+            continue
+        if take.get("state") == "done" and take.get("speakers") and take.get("segments"):
+            found.append((take_dir.name, take))
+    return sorted(found, key=lambda t: (t[1].get("name") or t[0]).lower())
+
+
+def _confirm(take: Dict[str, Any]) -> None:
+    """Mark lines where the AI is sure and the voice group agrees; remember each group's character."""
+    counts: Dict[int, Counter] = defaultdict(Counter)
+    for segment in take["segments"]:
+        if segment.get("character") and segment.get("conf") in ("high", "medium"):
+            counts[segment.get("speaker")][segment["character"]] += 1
+    owners: Dict[str, str] = {}
+    for speaker, count in counts.items():
+        character, n = count.most_common(1)[0]
+        if n / sum(count.values()) >= GROUP_MAJORITY:
+            owners[str(speaker)] = character
+    take["groupCharacters"] = owners
+    for segment in take["segments"]:
+        segment["confirmed"] = bool(
+            segment.get("character") and segment.get("conf") == "high"
+            and owners.get(str(segment.get("speaker"))) == segment["character"]
+        )
+
+
+def _store(voice: Voice, take_id: str, answers: Dict[int, Tuple[Optional[str], str]], complete: bool, model: str) -> None:
+    """Write the answers into take.json (re-read first: the page may have changed it meanwhile)."""
+    from . import freeform
+
+    take_dir = freeform._takes_dir(voice) / take_id
+    if take_id in freeform._live or not (take_dir / "take.json").is_file():
+        return
+    take = freeform._read(take_dir)
+    for index, (character, conf) in answers.items():
+        if 0 <= index < len(take["segments"]):
+            take["segments"][index]["character"] = character
+            take["segments"][index]["conf"] = conf
+    _confirm(take)
+    if complete:
+        take["attributed"] = time.time()
+        take["attributedWith"] = model
+    freeform._write(take_dir, take)
+
+
+# ---- Asking the AI ------------------------------------------------------------------
 
 
 def _set_status(voice: Voice, **values: Any) -> None:
@@ -294,187 +360,219 @@ def _set_status(voice: Voice, **values: Any) -> None:
         speakers._save(voice, data)
 
 
-async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
-    """Ask the AI about the people not identified yet (or everyone)."""
-    settings = settings_store.load()
-    options = settings["identify"]
-    conn = settings_store.active_connection(settings)
-    if conn is None:
-        raise RuntimeError("Add an AI connection in Settings → AI connections first")
-
-    await asyncio.to_thread(backfill, voice)
-    data = speakers.load(voice)
-    candidates = [
-        p for p in data["people"]
-        if p.get("lines") and (everyone or not p.get("ai") or p["ai"].get("lines") != len(p["lines"]))
-    ]
-    candidates = sorted(candidates, key=lambda p: -p["seconds"])[:MAX_PEOPLE]
-    if not candidates:
-        _set_status(voice, state="done", error=None, identified=0)
-        return speakers.public(voice)
-
-    files = list(dict.fromkeys(line["file"] for p in candidates for line in p.get("lines", []) if line.get("file")))
-    tags = data.get("files") or {}
-    known_show = (data.get("ai") or {}).get("show")
-    show, cast = "", []
-    if options["castLookup"]:
-        show, cast = await _safe_cast_lookup(files, tags, known_show)
-    searching = bool(options["webSearch"] and providers.web_search_support(conn))
-
-    async def ask(batch: List[Dict[str, Any]], named: List[Dict[str, Any]], show: str,
-                  cast: List[str]) -> Tuple[Optional[str], List[Dict[str, Any]]]:
-        batch_files = list(dict.fromkeys(
-            line["file"] for p in batch for line in p.get("lines", []) if line.get("file")))
-        prompt = [{"role": "user", "content": _prompt(batch, named, batch_files, show, cast, tags, searching)}]
-        # Room for reasoning models and web search results, not only the JSON
-        budget = min(MAX_TOKENS, 3000 + 150 * len(batch))
+async def _ask(conn: Dict[str, Any], options: Dict[str, Any], prompt: str, lines: int
+               ) -> Tuple[Optional[str], List[Tuple[int, Optional[str], str]]]:
+    messages = [{"role": "user", "content": prompt}]
+    # Room for reasoning models and web search results, not only the JSON
+    budget = min(MAX_TOKENS, 1500 + 30 * lines)
+    kwargs = dict(system=SYSTEM, temperature=0.2, web_search=options["webSearch"], timeout=REQUEST_TIMEOUT,
+                  think=False, json_mode=True)
+    try:
+        reply = await providers.chat(conn, messages, max_tokens=budget, **kwargs)
+    except providers.EmptyAnswer as err:
+        if not err.out_of_tokens or budget >= RETRY_MAX_TOKENS:
+            raise
+        _LOGGER.info("AI ran out of tokens (%d) before answering; retrying with %d", budget, RETRY_MAX_TOKENS)
         try:
-            reply = await providers.chat(conn, prompt, system=SYSTEM, temperature=0.2, max_tokens=budget,
-                                         web_search=options["webSearch"], timeout=REQUEST_TIMEOUT, think=False,
-                                         json_mode=True)
-        except providers.EmptyAnswer as err:
-            if not err.out_of_tokens or budget >= RETRY_MAX_TOKENS:
+            reply = await providers.chat(conn, messages, max_tokens=RETRY_MAX_TOKENS, **kwargs)
+        except providers.ProviderError as retry_err:
+            if isinstance(retry_err, providers.EmptyAnswer):
                 raise
-            _LOGGER.info("AI ran out of tokens (%d) before answering; retrying with %d", budget, RETRY_MAX_TOKENS)
-            try:
-                reply = await providers.chat(conn, prompt, system=SYSTEM, temperature=0.2,
-                                             max_tokens=RETRY_MAX_TOKENS, web_search=options["webSearch"],
-                                             timeout=REQUEST_TIMEOUT, think=False, json_mode=True)
-            except providers.ProviderError as retry_err:
-                if isinstance(retry_err, providers.EmptyAnswer):
-                    raise
-                raise err from retry_err  # e.g. the model doesn't allow that many tokens
-        return _parse_reply(reply)
-
-    def known_names(batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Names so far (the user's, and the AI's from earlier groups), for consistent answers."""
-        people = speakers.load(voice)["people"]
-        asking = {p["id"] for p in batch}
-        named = [{"id": p["id"], "name": p["name"]} for p in people if not _DEFAULT_NAME.match(p["name"])]
-        named += [{"id": p["id"], "name": f'{p["ai"]["name"]} (AI, {p["ai"]["confidence"]})'}
-                  for p in people if _DEFAULT_NAME.match(p["name"]) and (p.get("ai") or {}).get("name")
-                  and p["id"] not in asking]
-        return named[:300]
-
-    batches = [candidates[i:i + BATCH] for i in range(0, len(candidates), BATCH)]
-    _set_status(voice, state="running", error=None, cast=show or None,
-                detail=f"group 1 of {len(batches)}" if len(batches) > 1 else None)
-    started = time.monotonic()
-    answered = renamed = 0
-    recognised = None
-    failed: List[str] = []
-    for n, batch in enumerate(batches):
-        if n:
-            _set_status(voice, state="running", detail=f"group {n + 1} of {len(batches)}")
-        named = known_names(batch)
-        try:
-            found_show, answer_list = await ask(batch, named, show, cast)
-        except providers.ProviderError as err:
-            if len(batches) == 1:
-                raise
-            # Keep going with the other groups; this one is asked again next run
-            _LOGGER.warning("AI identification for %s, group %d of %d failed: %s", voice.name, n + 1, len(batches), err)
-            failed.append(str(err))
-            continue
-        recognised = recognised or found_show
-        if found_show and not cast and options["castLookup"]:
-            # The AI recognised the show from the dialogue: get its cast and ask again with it
-            show, cast = await _safe_cast_lookup([], {}, found_show)
-            if cast:
-                _set_status(voice, state="running", cast=show)
-                _LOGGER.info("AI recognised %s from the dialogue; asking again with its cast", show)
-                found_show, answer_list = await ask(batch, named, show, cast)
-        answers = {a["id"]: a for a in answer_list}
-        renamed += _store_answers(voice, answers, options)
-        answered += len(answers)
-
-    with speakers._lock:
-        data = speakers.load(voice)
-        data["ai"] = {"state": "done", "error": None, "at": time.time(), "cast": show or None,
-                      "identified": answered, "show": show or recognised or known_show, "detail": None}
-        if failed:
-            data["ai"].update(state="error" if len(failed) == len(batches) else "done",
-                              error=f"{len(failed)} of {len(batches)} groups failed: {failed[-1]}")
-        speakers._save(voice, data)
-
-    merged = _auto_merge(voice) if options.get("autoMerge") else 0
-    _LOGGER.info("AI identification for %s: %d of %d people answered in %d group(s), %d renamed, %d merged, in %.0fs%s",
-                 voice.name, answered, len(candidates), len(batches), renamed, merged,
-                 time.monotonic() - started, f" (cast: {show})" if show else "")
-    return speakers.public(voice)
+            raise err from retry_err  # e.g. the model doesn't allow that many tokens
+    return _parse(reply)
 
 
-def _store_answers(voice: Voice, answers: Dict[str, Dict[str, Any]], options: Dict[str, Any]) -> int:
-    """Save the AI's answers on the people (right away, so each group shows up); returns how many were renamed."""
+async def _attribute(voice: Voice, take_id: str, take: Dict[str, Any], ctx: Dict[str, Any],
+                     progress: Any) -> Optional[str]:
+    """Ask who says each line of one file, part by part; returns the show the AI named, if any."""
+    segments = take["segments"]
+    letters = _letters(take)
+    order = [i for i, s in enumerate(segments) if (s.get("text") or "").strip()]
+    chunks = [order[k:k + CHUNK] for k in range(0, len(order), CHUNK)]
+    hints = _group_hints(take, letters, ctx["people"])
+    file = take.get("name") or take_id
+    answers: Dict[int, Tuple[Optional[str], str]] = {}
+    found_show = None
+    complete = False
+    try:
+        for n, chunk in enumerate(chunks):
+            progress(n + 1, len(chunks))
+            before = [i for i in order if i < chunk[0]][-CONTEXT:]
+            context = [
+                _line(i, segments[i], letters) + f"  -> {answers.get(i, (None,))[0] or '?'}" for i in before
+            ]
+            prompt = _prompt(file, ctx["tags"].get(file) or take.get("tags") or {}, ctx["show"], ctx["cast"],
+                             hints, context, [_line(i, segments[i], letters) for i in chunk], ctx["searching"])
+            show, got = await _ask(ctx["conn"], ctx["options"], prompt, len(chunk))
+            found_show = found_show or show
+            wanted = set(chunk)
+            for number, name, conf in got:
+                if number - 1 in wanted:
+                    answers[number - 1] = (_canonical(name, ctx["cast_names"]), conf)
+        complete = True
+    finally:
+        if answers or complete:
+            _store(voice, take_id, answers, complete, ctx["conn"].get("model", ""))
+    return found_show
+
+
+def _name_cards(voice: Voice, options: Dict[str, Any], actors: Dict[str, str]) -> int:
+    """Each people card gets the character most of its lines belong to; returns how many were renamed."""
+    counts: Dict[str, Counter] = defaultdict(Counter)
+    for _take_id, take in _takes(voice):
+        people = {s["id"]: s.get("person") for s in take.get("speakers") or []}
+        for segment in take["segments"]:
+            person = people.get(segment.get("speaker"))
+            if person and segment.get("character") and segment.get("conf") in ("high", "medium"):
+                counts[person][segment["character"]] += 1
     renamed = 0
     with speakers._lock:
         data = speakers.load(voice)
         for person in data["people"]:
-            answer = answers.get(person["id"])
-            if not answer:
+            count = counts.get(person["id"])
+            if not count:
                 continue
-            name = (answer.get("name") or "").strip() or None
+            name, n = count.most_common(1)[0]
+            total = sum(count.values())
+            share = n / total
+            confidence = "high" if share >= 0.75 and n >= 5 else "medium" if share >= 0.5 and n >= 2 else "low"
             person["ai"] = {
-                "name": name,
-                "actor": (answer.get("actor") or "").strip() or None,
-                "confidence": answer.get("confidence") if answer.get("confidence") in ("high", "medium", "low") else "low",
-                "reason": str(answer.get("reason") or "")[:300],
-                "lines": len(person.get("lines", [])),
-                "at": time.time(),
+                "name": name, "actor": actors.get(name), "confidence": confidence,
+                "reason": f"{n} of their {total} identified lines are {name}",
+                "lines": len(person.get("lines", [])), "at": time.time(),
             }
-            if (options["autoName"] and name and name.lower() not in ("mixed", "unknown")
-                    and person["ai"]["confidence"] == "high" and _DEFAULT_NAME.match(person["name"])):
+            if options["autoName"] and confidence == "high" and _DEFAULT_NAME.match(person["name"]):
                 person["name"] = name[:40]
                 renamed += 1
         speakers._save(voice, data)
     return renamed
 
 
-def backfill(voice: Voice) -> int:
-    """Give people found before lines were kept (older imports) their lines and file metadata.
+async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
+    """Attribute the lines of the files not done yet (or all of them) and name the cards."""
+    settings = settings_store.load()
+    options = settings["identify"]
+    conn = settings_store.active_connection(settings)
+    if conn is None:
+        raise RuntimeError("Add an AI connection in Settings → AI connections first")
 
-    Uses the takes still waiting for review (saved takes are gone); runs once per voice.
-    """
-    from . import freeform  # imports speakers too
+    takes = _takes(voice)
+    pending = takes if everyone else [(i, t) for i, t in takes if not t.get("attributed")]
+    data = speakers.load(voice)
+    known_show = (data.get("ai") or {}).get("show")
+    tags = {**(data.get("files") or {}), **{t.get("name"): t["tags"] for _i, t in takes if t.get("tags") and t.get("name")}}
+    show, cast = "", []
+    if pending and options["castLookup"]:
+        show, cast = await _safe_cast_lookup([t.get("name") or i for i, t in takes], tags, known_show)
+    ctx = {
+        "conn": conn, "options": options, "tags": tags, "show": show, "cast": cast,
+        "cast_names": [c.rsplit(" (", 1)[0] for c in cast],
+        "people": {p["id"]: p for p in data["people"]},
+        "searching": bool(options["webSearch"] and providers.web_search_support(conn)),
+    }
 
-    if speakers.load(voice).get("backfilled"):
-        return 0
-    found: Dict[str, List[Tuple[str, Dict[str, Any], int]]] = {}
-    tags: Dict[str, Dict[str, str]] = {}
-    takes_dir = freeform._takes_dir(voice)
-    for take_dir in sorted(takes_dir.iterdir()) if takes_dir.is_dir() else []:
-        if not (take_dir / "take.json").is_file() or take_dir.name in freeform._live:
-            continue
+    _set_status(voice, state="running", error=None, cast=show or None,
+                detail=f"file 1 of {len(pending)}" if pending else None)
+    started = time.monotonic()
+    failed: List[str] = []
+    recognised = None
+    for n, (take_id, take) in enumerate(pending):
+        def progress(part: int, parts: int, n: int = n) -> None:
+            _set_status(voice, state="running",
+                        detail=f"file {n + 1} of {len(pending)}" + (f" · part {part} of {parts}" if parts > 1 else ""))
+
         try:
-            take = freeform._read(take_dir)
-        except (OSError, ValueError):
+            found = await _attribute(voice, take_id, take, ctx, progress)
+        except providers.ProviderError as err:
+            _LOGGER.warning("AI identification for %s, file %s failed: %s", voice.name, take.get("name") or take_id, err)
+            failed.append(str(err))
             continue
-        name = take.get("name") or ""
-        for speaker in take.get("speakers") or []:
-            if speaker.get("person"):
-                found.setdefault(speaker["person"], []).append((take_dir.name, take, speaker["id"]))
-        source = take_dir / (take.get("source") or "")
-        if name and take.get("speakers") and "tags" not in take and source.is_file():
-            tags[name] = freeform.file_tags(source)
+        recognised = recognised or found
+        if found and not ctx["cast"] and options["castLookup"]:
+            # The AI recognised the show from the dialogue: use its cast from the next file on
+            ctx["show"], ctx["cast"] = await _safe_cast_lookup([], {}, found)
+            ctx["cast_names"] = [c.rsplit(" (", 1)[0] for c in ctx["cast"]]
+            if ctx["cast"]:
+                _LOGGER.info("AI recognised %s from the dialogue; using its cast", ctx["show"])
+                _set_status(voice, state="running", cast=ctx["show"])
 
-    added = 0
+    actors = dict(c[:-1].rsplit(" (", 1) for c in ctx["cast"] if c.endswith(")") and " (" in c)
+    renamed = _name_cards(voice, options, actors)
+    merged = _auto_merge(voice) if options.get("autoMerge") else 0
     with speakers._lock:
         data = speakers.load(voice)
-        for person in data["people"]:
-            have = {line.get("file") for line in person.get("lines", [])}
-            for _take_id, take, speaker_id in found.get(person["id"], []):
-                if (take.get("name") or "") not in have:
-                    speakers._add_lines(person, take, speaker_id)
-                    added += 1
-        files = data.setdefault("files", {})
-        for name, value in tags.items():
-            if value:
-                files.setdefault(name, value)
-        data["backfilled"] = True
+        data["ai"] = {"state": "done", "error": None, "at": time.time(), "cast": ctx["show"] or None,
+                      "identified": len(pending) - len(failed), "show": ctx["show"] or recognised or known_show,
+                      "detail": None}
+        if failed:
+            data["ai"].update(state="error" if len(failed) == len(pending) else "done",
+                              error=f"{len(failed)} of {len(pending)} files failed: {failed[-1]}")
         speakers._save(voice, data)
-    if added:
-        _LOGGER.info("AI identification for %s: added lines from %d earlier files", voice.name, added)
-    return added
+    _LOGGER.info("AI identification for %s: %d of %d files attributed, %d cards renamed, %d merged, in %.0fs%s",
+                 voice.name, len(pending) - len(failed), len(pending), renamed, merged,
+                 time.monotonic() - started, f" (cast: {ctx['show']})" if ctx["show"] else "")
+    return speakers.public(voice)
+
+
+# ---- Characters and their clips ------------------------------------------------------
+
+
+def characters(voice: Voice) -> List[Dict[str, Any]]:
+    """Every character the AI found: confirmed and possible clips, speech time, files."""
+    stats: Dict[str, Dict[str, Any]] = {}
+
+    def entry(name: str) -> Dict[str, Any]:
+        return stats.setdefault(name, {"name": name, "confirmed": 0, "possible": 0, "seconds": 0.0,
+                                       "saved": 0, "files": set()})
+
+    for take_id, take in _takes(voice):
+        owners = take.get("groupCharacters") or {}
+        for segment in take["segments"]:
+            character = segment.get("character")
+            owner = owners.get(str(segment.get("speaker")))
+            if character:
+                e = entry(character)
+                e["files"].add(take_id)
+                if segment.get("confirmed"):
+                    e["confirmed"] += 1
+                    e["seconds"] += segment["end"] - segment["start"]
+                else:
+                    e["possible"] += 1
+                e["saved"] += bool(segment.get("saved"))
+            elif owner and "character" in segment:
+                entry(owner)["possible"] += 1
+    out = [{**e, "seconds": round(e["seconds"], 1), "files": len(e["files"])} for e in stats.values()]
+    return sorted(out, key=lambda e: (-e["seconds"], -e["possible"]))
+
+
+def character_clips(voice: Voice, name: str) -> Dict[str, Any]:
+    """One character's clips across all files: confirmed (AI sure, voice agrees) and possible."""
+    confirmed, possible = [], []
+    for take_id, take in _takes(voice):
+        owners = take.get("groupCharacters") or {}
+        for index, segment in enumerate(take["segments"]):
+            character = segment.get("character")
+            owner = owners.get(str(segment.get("speaker")))
+            if character != name and not (character is None and "character" in segment and owner == name):
+                continue
+            clip = {
+                "take": take_id, "file": take.get("name") or take_id, "index": index, "text": segment["text"],
+                "start": segment["start"], "end": segment["end"], "conf": segment.get("conf"),
+                "saved": bool(segment.get("saved")), "denoise": take.get("denoise") or "off",
+            }
+            if segment.get("confirmed"):
+                confirmed.append(clip)
+                continue
+            if character is None:
+                clip["reason"] = f"the AI couldn't tell; the voice is mostly {name} in this file"
+            elif owner and owner != name:
+                clip["reason"] = f"the AI says {name}, but this voice is mostly {owner} in this file"
+            elif not owner:
+                clip["reason"] = f"the AI says {name} ({segment.get('conf')}); this voice is mixed in this file"
+            else:
+                clip["reason"] = f"the AI is {segment.get('conf') or 'not'} sure"
+            possible.append(clip)
+    return {"name": name, "confirmed": confirmed, "possible": possible}
 
 
 async def _safe_cast_lookup(files: List[str], tags: Dict[str, Dict[str, str]],

@@ -291,6 +291,30 @@ class IdentifyRequest(BaseModel):
     everyone: bool = False
 
 
+@app.get("/api/voices/{name}/characters")
+async def api_characters(name: str) -> Dict[str, Any]:
+    """Every character the AI found in the imported files, with their clip counts."""
+    return {"characters": await asyncio.to_thread(identify.characters, store.get(name))}
+
+
+@app.get("/api/voices/{name}/characters/clips")
+async def api_character_clips(name: str, character: str) -> Dict[str, Any]:
+    """One character's confirmed and possible clips across all files."""
+    return await asyncio.to_thread(identify.character_clips, store.get(name), character)
+
+
+class SaveClipsRequest(BaseModel):
+    clips: List[Dict[str, Any]]
+
+
+@app.post("/api/voices/{name}/clips/save")
+async def api_save_clips(name: str, request: SaveClipsRequest) -> Dict[str, Any]:
+    """Save clips picked across files; the files stay for other characters."""
+    voice = store.get(name)
+    saved = await asyncio.to_thread(freeform.save_clips, voice, request.clips)
+    return {"saved": saved, "recorded": voice.num_recorded()}
+
+
 class FocusRequest(BaseModel):
     ids: List[str]
 

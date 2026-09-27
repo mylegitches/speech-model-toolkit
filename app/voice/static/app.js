@@ -73,6 +73,8 @@ async function selectVoice(name) {
   $('#voice-summary').textContent =
     `${voice.languageName} · ${voice.gender} · phonemes: ${voice.espeak_voice} · model: ${voice.modelName}.onnx`;
   loadSpeed();
+  charUi.name = null;
+  show($('#character-panel'), false);
   $('#speak-input').value = TEST_SENTENCES[voice.language.split('-')[0]] || '';
 
   skip = 0;
@@ -686,6 +688,11 @@ async function loadPeople() {
   } catch (err) {
     people = { people: [], target: null };
   }
+  try {
+    peopleUi.characters = (await api(voiceUrl('/characters'))).characters;
+  } catch (err) {
+    peopleUi.characters = [];
+  }
   // Poll while the AI is identifying people
   clearTimeout(peopleTimer);
   if (people.identify?.running) peopleTimer = setTimeout(() => { if (voice) loadPeople(); }, 3000);
@@ -906,7 +913,7 @@ function identifyBar() {
   const info = people.identify || {};
   const bar = el('div', { className: 'identify-bar' });
   if (!info.enabled || !info.connected) {
-    bar.append(el('span', { className: 'hint' }, 'Let AI name these people (e.g. the characters of a series): ',
+    bar.append(el('span', { className: 'hint' }, 'Let AI work out who says each line (e.g. the characters of a series): ',
       el('a', { href: '../#settings', target: '_top', textContent: info.connected ? 'turn on Speaker identification in Settings' : 'add an AI connection and turn on Speaker identification in Settings' })));
     return bar;
   }
@@ -915,7 +922,7 @@ function identifyBar() {
   const go = el('button', {
     type: 'button', className: 'btn btn--secondary', disabled: running,
     textContent: running ? 'Identifying…' : '🔎 Identify with AI',
-    title: 'Ask the AI who the people not identified yet are (Shift-click: everyone again)',
+    title: 'The AI reads the transcript of each file not done yet and says who speaks each line (Shift-click: all files again)',
   });
   go.addEventListener('click', async (e) => {
     go.disabled = true;
@@ -1031,7 +1038,12 @@ function renderPeople() {
 
   const multi = lastTakes.filter((t) => t.speakers).length > 1;
   const suggestions = list.filter((p) => (p.similar || []).length).length;
-  box.append(el('div', { className: 'people-head' },
+  box.append(identifyBar());
+  const chars = peopleUi.characters || [];
+  if (chars.length) box.append(characterList(chars));
+  // With characters, the voice cards are the detail behind them: folded away
+  const host = chars.length ? el('div', { className: 'people-cards' }) : box;
+  host.append(el('div', { className: 'people-head' },
     el('strong', { textContent: `People in your files (${list.length})` }),
     el('span', {
       className: 'hint',
@@ -1039,7 +1051,6 @@ function renderPeople() {
         + 'Click a name to rename. Mark the voice you want'
         + (suggestions ? '; “Maybe the same as” flags people who may have been split in two.' : '.'),
     })));
-  box.append(identifyBar());
 
   // Tools for long lists: search, and merging several at once
   const tools = el('div', { className: 'people-tools' });
@@ -1073,32 +1084,7 @@ function renderPeople() {
   } else if (list.length > 2) {
     tools.append(el('span', { className: 'hint', textContent: 'Tick two or more to merge them.' }));
   }
-  if (tools.childNodes.length) box.append(tools);
-
-  // Every character found so far (your names and the AI's): pick one to see only them
-  const characters = new Map();
-  list.forEach((p) => {
-    const key = characterOf(p);
-    if (!key) return;
-    if (!characters.has(key)) characters.set(key, []);
-    characters.get(key).push(p);
-  });
-  if (characters.size) {
-    const focusChars = new Set((people.focus || []).map(personById).filter(Boolean).map(characterOf));
-    const chips = el('div', { className: 'character-list' }, el('span', { className: 'hint', textContent: 'Characters:' }));
-    [...characters.entries()].sort((x, y) => sum(y[1]) - sum(x[1])).forEach(([key, cards]) => {
-      const named = cards.find((c) => !/^Person \d+$/.test(c.name.trim()));
-      const title = named ? named.name : cards[0].ai.name;
-      const chip = el('button', {
-        type: 'button', className: `chip${focusChars.has(key) ? ' chip--on' : ''}`,
-        textContent: `${title} · ${clock(sum(cards))}${cards.length > 1 ? ` · ${cards.length} cards` : ''}`,
-        title: focusChars.has(key) ? 'Show everyone again' : `Show only ${title} and possible matches`,
-      });
-      chip.addEventListener('click', () => setFocus(focusChars.has(key) ? [] : cards.map((c) => c.id)));
-      chips.append(chip);
-    });
-    box.append(chips);
-  }
+  if (tools.childNodes.length) host.append(tools);
 
   // Focus: only chosen characters and their possible matches
   const visible = focusVisible();
@@ -1118,7 +1104,7 @@ function renderPeople() {
     const clearFocus = el('button', { type: 'button', className: 'btn btn--secondary', textContent: 'Show everyone' });
     clearFocus.addEventListener('click', () => setFocus([]));
     banner.append(toggle, clearFocus);
-    box.append(banner);
+    host.append(banner);
   }
 
   const needle = peopleUi.filter.trim().toLowerCase();
@@ -1157,7 +1143,7 @@ function renderPeople() {
       }
       const grid = el('div', { className: 'people' });
       cards.forEach((person) => grid.append(personCard(person)));
-      box.append(el('section', { className: 'character-group' }, head, grid));
+      host.append(el('section', { className: 'character-group' }, head, grid));
     };
     section(`Confirmed (${confirmed.length})`, `${clock(sum(confirmed))} of speech · named by you, or the AI is sure`, confirmed, true);
     section(`Possible matches (${possible.length})`,
@@ -1173,15 +1159,15 @@ function renderPeople() {
     });
     const split = [...groups.values()].filter((g) => g.length > 1)
       .sort((a, b) => sum(b) - sum(a));
-    split.forEach((group) => box.append(characterGroup(group)));
+    split.forEach((group) => host.append(characterGroup(group)));
 
     const sorted = all.filter((p) => groups.get(characterOf(p) || `#${p.id}`).length === 1);
     const shown = needle || peopleUi.showAll ? sorted : sorted.slice(0, PEOPLE_SHOWN);
     const grid = el('div', { className: 'people' });
     shown.forEach((person) => grid.append(personCard(person)));
     if (shown.length) {
-      if (split.length) box.append(el('strong', { className: 'group-title', textContent: 'Everyone else' }));
-      box.append(grid);
+      if (split.length) host.append(el('strong', { className: 'group-title', textContent: 'Everyone else' }));
+      host.append(grid);
     }
     if (shown.length < sorted.length) {
       const more = el('button', {
@@ -1189,22 +1175,22 @@ function renderPeople() {
         textContent: `Show all ${sorted.length} people (${sorted.length - shown.length} more with less speech)`,
       });
       more.addEventListener('click', () => { peopleUi.showAll = true; renderPeople(); });
-      box.append(more);
+      host.append(more);
     } else if (peopleUi.showAll && sorted.length > PEOPLE_SHOWN && !needle) {
       const less = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Show fewer' });
       less.addEventListener('click', () => { peopleUi.showAll = false; renderPeople(); });
-      box.append(less);
+      host.append(less);
     }
 
   }
 
   if (visible && peopleUi.showHidden && hiddenPeople.length) {
-    box.append(el('strong', { className: 'group-title', textContent: `Hidden (${hiddenPeople.length}): not ${focusTitles.join(' or ')}, as far as names and voices tell` }));
+    host.append(el('strong', { className: 'group-title', textContent: `Hidden (${hiddenPeople.length}): not ${focusTitles.join(' or ')}, as far as names and voices tell` }));
     const hiddenGrid = el('div', { className: 'people hidden-people' });
     [...hiddenPeople].sort((a, b) => b.seconds - a.seconds)
       .filter((p) => !needle || p.name.toLowerCase().includes(needle) || (p.ai?.name || '').toLowerCase().includes(needle))
       .forEach((person) => hiddenGrid.append(personCard(person)));
-    box.append(hiddenGrid);
+    host.append(hiddenGrid);
   }
 
   const target = personById(people.target);
@@ -1236,10 +1222,179 @@ function renderPeople() {
         $('#free-upload-status').textContent = `Added ${saved} clips of ${target.name} to the dataset.`;
         loadTakes();
       });
-      box.append(el('div', { className: 'take-foot' },
+      host.append(el('div', { className: 'take-foot' },
         el('span', { className: 'hint', textContent: 'Review the clips in each file below first; your edits and unticks are kept.' }), saveAll));
     }
   }
+  if (chars.length) {
+    const details = el('details', { className: 'voice-cards' },
+      el('summary', { textContent: `Voice cards (${list.length}): the voice groups behind the characters, for renaming and merging by hand` }),
+      host);
+    details.open = Boolean(peopleUi.cardsOpen);
+    details.addEventListener('toggle', () => { peopleUi.cardsOpen = details.open; });
+    box.append(details);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Characters: who says what, from the AI reading every transcript line
+
+/** Chips for every character the AI found; click one to review their clips. */
+function characterList(chars) {
+  const box = el('div', { className: 'character-list' },
+    el('span', { className: 'hint', textContent: 'Characters (who says what, from the AI reading every line):' }));
+  chars.forEach((c) => {
+    const chip = el('button', {
+      type: 'button', className: `chip${charUi.name === c.name ? ' chip--on' : ''}`,
+      textContent: `${c.name} · ${c.confirmed} ✓${c.possible ? ` · ${c.possible} ?` : ''}`,
+      title: `${c.confirmed} confirmed clips (${clock(c.seconds)}), ${c.possible} possible, in ${c.files} file${c.files === 1 ? '' : 's'}`
+        + (c.saved ? ` · ${c.saved} already saved` : ''),
+    });
+    chip.addEventListener('click', () => (charUi.name === c.name ? closeCharacter() : openCharacter(c.name)));
+    box.append(chip);
+  });
+  return box;
+}
+
+const charUi = { name: null, data: null, keep: new Map(), text: new Map(), open: new Set() };
+
+async function openCharacter(name, keepChoices = false) {
+  const panel = $('#character-panel');
+  if (!keepChoices) {
+    Object.assign(charUi, { name, data: null, keep: new Map(), text: new Map(), open: new Set() });
+    panel.innerHTML = '';
+    panel.append(el('p', { className: 'hint', textContent: `Loading ${name}'s clips…` }));
+  }
+  show(panel, true);
+  renderPeople();
+  try {
+    charUi.data = await api(voiceUrl(`/characters/clips?character=${encodeURIComponent(name)}`));
+  } catch (err) {
+    SMT.showError(err.message);
+    closeCharacter();
+    return;
+  }
+  if (charUi.name !== name) return;
+  renderCharacter();
+  if (!keepChoices) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeCharacter() {
+  charUi.name = null;
+  show($('#character-panel'), false);
+  renderPeople();
+}
+
+const clipKey = (clip) => `${clip.take}:${clip.index}`;
+
+function renderCharacter() {
+  const panel = $('#character-panel');
+  const { name, confirmed, possible } = charUi.data;
+  panel.innerHTML = '';
+  const files = new Set([...confirmed, ...possible].map((c) => c.take)).size;
+  const close = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '✕ Close' });
+  close.addEventListener('click', closeCharacter);
+  panel.append(el('div', { className: 'group-head' },
+    el('h3', { textContent: name }),
+    el('span', { className: 'hint', textContent: `${confirmed.length} confirmed · ${possible.length} possible · in ${files} file${files === 1 ? '' : 's'}` }),
+    close));
+  panel.append(el('p', {
+    className: 'hint',
+    textContent: 'Confirmed: the AI is sure it\'s them and the voice agrees. Possible: check these (▶), tick the ones that really are them. '
+      + 'Untick lines with music, shouting, whispering or other voices; fix wrong words.',
+  }));
+
+  const save = el('button', { type: 'button', className: 'btn btn--primary' });
+  const updateSave = () => {
+    const n = [...confirmed, ...possible].filter((c) => !c.saved && ticked(c)).length;
+    save.textContent = `✓ Save ${n} ticked clip${n === 1 ? '' : 's'} of ${name} to the dataset`;
+    save.disabled = n === 0;
+  };
+  const ticked = (clip) => charUi.keep.get(clipKey(clip)) ?? !clip.possible;  // confirmed ticked, possible not
+
+  const section = (title, clips, possibleSection) => {
+    if (!clips.length) return;
+    clips.forEach((c) => { c.possible = possibleSection; });
+    const head = el('div', { className: 'group-head' }, el('strong', { textContent: `${title} (${clips.length})` }));
+    const all = el('button', { type: 'button', className: 'btn btn--ghost', textContent: possibleSection ? 'Tick all' : 'Untick all' });
+    all.addEventListener('click', () => {
+      clips.forEach((c) => { if (!c.saved) charUi.keep.set(clipKey(c), possibleSection); });
+      renderCharacter();
+    });
+    head.append(all);
+    const box = el('section', { className: 'character-group' }, head);
+    const byFile = new Map();
+    clips.forEach((c) => { if (!byFile.has(c.take)) byFile.set(c.take, []); byFile.get(c.take).push(c); });
+    [...byFile.values()].forEach((fileClips, i) => {
+      const id = `${possibleSection ? 'p' : 'c'}:${fileClips[0].take}`;
+      const details = el('details', { className: 'char-file' });
+      if (charUi.open.has(id) || (!possibleSection && i === 0 && !charUi.open.size)) details.open = true;
+      const n = fileClips.filter((c) => !c.saved && ticked(c)).length;
+      details.append(el('summary', { textContent: `${fileClips[0].file} · ${n} of ${fileClips.length} ticked` }));
+      const fill = () => {
+        if (details.dataset.filled) return;
+        details.dataset.filled = '1';
+        const list = el('div', { className: 'clips' });
+        fileClips.forEach((clip) => list.append(characterClipRow(clip, ticked, () => {
+          details.querySelector('summary').textContent =
+            `${clip.file} · ${fileClips.filter((c) => !c.saved && ticked(c)).length} of ${fileClips.length} ticked`;
+          updateSave();
+        })));
+        details.append(list);
+      };
+      details.addEventListener('toggle', () => {
+        if (details.open) { charUi.open.add(id); fill(); } else charUi.open.delete(id);
+      });
+      if (details.open) fill();
+      box.append(details);
+    });
+    panel.append(box);
+  };
+  section('Confirmed', confirmed, false);
+  section('Possible', possible, true);
+  if (!confirmed.length && !possible.length) {
+    panel.append(el('p', { className: 'hint', textContent: 'No clips of this character.' }));
+  }
+
+  save.addEventListener('click', async () => {
+    const clips = [...confirmed, ...possible].filter((c) => !c.saved && ticked(c))
+      .map((c) => ({ take: c.take, index: c.index, text: (charUi.text.get(clipKey(c)) ?? c.text).trim() }))
+      .filter((c) => c.text);
+    save.disabled = true;
+    save.textContent = `Saving ${clips.length} clips…`;
+    try {
+      const result = await postJson(voiceUrl('/clips/save'), { clips });
+      updateRecorded(result.recorded);
+      $('#free-upload-status').textContent = `Added ${result.saved} clips of ${name} to the dataset.`;
+    } catch (err) {
+      SMT.showError(err.message);
+    }
+    openCharacter(name, true);  // shows them as saved; your ticks and edits stay
+    loadPeople();
+  });
+  panel.append(el('div', { className: 'take-foot' }, save));
+  updateSave();
+}
+
+function characterClipRow(clip, ticked, changed) {
+  const key = clipKey(clip);
+  const row = el('div', { className: `clip${ticked(clip) && !clip.saved ? '' : ' skipped'}` });
+  const keep = el('input', { type: 'checkbox', checked: ticked(clip) && !clip.saved, disabled: clip.saved,
+    title: clip.saved ? 'Already in the dataset' : 'Save this clip' });
+  keep.addEventListener('change', () => {
+    charUi.keep.set(key, keep.checked);
+    row.classList.toggle('skipped', !keep.checked);
+    changed();
+  });
+  const play = el('button', { type: 'button', className: 'btn btn--secondary', textContent: '▶' });
+  play.addEventListener('click', () => playClip({ id: clip.take, denoise: clip.denoise }, clip.index, play));
+  const text = el('input', { type: 'text', value: charUi.text.get(key) ?? clip.text, disabled: clip.saved });
+  text.addEventListener('input', () => charUi.text.set(key, text.value));
+  row.append(keep, play, text,
+    el('span', { className: 'dur', textContent: clip.saved ? 'saved' : `${(clip.end - clip.start).toFixed(1)}s`,
+      title: `at ${clock(clip.start)} in ${clip.file}` }));
+  if (!clip.reason) return row;
+  return el('div', { className: 'clip-with-reason' }, row, el('small', { className: 'hint', textContent: clip.reason }));
 }
 
 async function loadTakes() {
