@@ -160,7 +160,7 @@
 .char-file-name { flex: 1; min-width: 12rem; }
 .char-file-tools { display: flex; gap: 0.3rem; }
 .char-file-tools .btn { padding: 0.15rem 0.5rem; font-size: 0.76rem; min-height: 0; }
-.char-file .clips { margin-top: 0.4rem; }
+.char-file .clips { margin-top: 0.4rem; max-height: none; overflow: visible; }  /* the whole episode, no inner scrollbar */
 .clip-with-reason { display: flex; flex-direction: column; gap: 0.1rem; }
 .clip-with-reason small { padding-left: 4.2rem; }
 .voice-cards > summary { cursor: pointer; color: var(--muted); margin: 0.3rem 0; }
