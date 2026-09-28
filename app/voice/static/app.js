@@ -1404,7 +1404,8 @@ function cloneFilesTable(takes) {
   table.append(el('thead', {}, el('tr', {}, ...cols.map((c, i) => el('th', { textContent: c, className: i > 1 ? 'num' : '' })))));
   const body = el('tbody');
   const totals = { lines: 0, confirmed: 0, possible: 0, added: 0, edited: 0, leftOut: 0, toReview: 0 };
-  const sorted = [...takes].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, undefined, { numeric: true }));
+  // Oldest first, like the character review (take ids are upload timestamps)
+  const sorted = [...takes].sort((a, b) => (a.created || 0) - (b.created || 0) || a.id.localeCompare(b.id));
   sorted.forEach((take) => {
     const [stage, style] = cloneStage(take);
     const lines = take.state === 'done' ? (take.segments || []).length : null;
@@ -1424,7 +1425,7 @@ function cloneFilesTable(takes) {
     const num = (v) => el('td', { className: 'num', textContent: v == null ? '' : String(v) });
     const cells = [
       el('td', { className: 'file', textContent: take.name || take.id, title: take.name || take.id }),
-      el('td', {}, el('span', { className: `pill ${style}`, textContent: stage })),
+      el('td', { className: 'stage' }, el('span', { className: `pill ${style}`, textContent: stage })),
       num(lines),
     ];
     if (name) {
