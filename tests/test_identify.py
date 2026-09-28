@@ -171,6 +171,35 @@ def test_parse_json_and_broken_json():
         identify._parse("I think it's Tony.")
 
 
+def test_parse_other_layouts():
+    want = [(1, "Tony Soprano", "high"), (2, None, "low")]
+    replies = [
+        '```json\n[["L1", "Tony Soprano", "high"], ["L2", null, "low"]]\n```',
+        '{"lines": [{"line": "L1", "speaker": "Tony Soprano", "confidence": "high"}, {"id": 2, "speaker": null}]}',
+        '{"lines": {"L1": ["Tony Soprano", "high"], "L2": null}}',
+        'Here you go: {"L1": {"character": "Tony Soprano", "conf": "High"}, "L2": "unknown"}',
+        "After searching, I'm confident:\nL1: Tony Soprano (high)\nL2: unknown",
+    ]
+    for reply in replies:
+        assert identify._parse(reply)[1] == want, reply
+
+
+def test_unreadable_answer_is_asked_again_as_json(voice, monkeypatch):
+    calls = []
+    real = script_ai([])
+
+    async def chat(conn, messages, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return "Tony says most of these, and Carmela the dinner line."  # prose, after a web search
+        return await real(conn, messages[:1], **kwargs)
+
+    monkeypatch.setattr(identify.providers, "chat", chat)
+    asyncio.run(identify.identify(voice))
+    assert calls[1]["json_mode"] and not calls[1]["web_search"]
+    assert take(voice, "t1").get("attributed")
+
+
 def test_canonical_names():
     cast = ["Tony Soprano", "Tony Blundetto", "Carmela Soprano"]
     assert identify._canonical("carmela", cast) == "Carmela Soprano"

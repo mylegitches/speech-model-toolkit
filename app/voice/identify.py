@@ -238,41 +238,85 @@ def _prompt(file: str, tags: Dict[str, str], show: str, cast: List[str], hints: 
 _TRIPLE = re.compile(r'\[\s*"L(\d+)"\s*,\s*(null|"((?:[^"\\]|\\.)*)")\s*,\s*"?(high|medium|low)"?\s*\]', re.IGNORECASE)
 
 
+class NotTheJSON(providers.ProviderError):
+    """The AI answered, but not with the JSON asked for (prose, another layout...)."""
+
+
+_LINE_ID = re.compile(r"L?(\d+)", re.IGNORECASE)
+_PROSE = re.compile(r'^[\s*\-•]*\**"?L(\d+)"?\**\s*[:=\-–|]\s*([^\n(|]+?)\s*(?:[(|,\-–]\s*(high|medium|low)\s*\)?)?\s*$',
+                    re.IGNORECASE | re.MULTILINE)
+
+
+def _first(entry: Dict[str, Any], *keys: str) -> Any:
+    return next((entry[k] for k in keys if entry.get(k) is not None), None)
+
+
+def _entry(key: Any, value: Any) -> Optional[Tuple[int, Optional[str], str]]:
+    """One answer in any of the layouts models use: ["L1", "Tony", "high"],
+    {"id": "L1", "speaker": "Tony", "confidence": "high"}, or "L1": "Tony" / {...}."""
+    if isinstance(value, dict):
+        key = _first(value, "id", "line", "l", "number") if key is None else key
+        name = _first(value, "name", "character", "speaker", "who", "char")
+        conf = _first(value, "confidence", "conf", "certainty", "c")
+    elif isinstance(value, (list, tuple)):
+        if key is None:
+            if len(value) < 2:
+                return None
+            key, value = value[0], value[1:]
+        name = value[0] if value else None
+        conf = value[1] if len(value) > 1 else None
+    else:
+        name, conf = value, None
+    m = _LINE_ID.fullmatch(str(key).strip()) if key is not None else None
+    if not m:
+        return None
+    name = (name.strip() if isinstance(name, str)
+            and name.strip().lower() not in ("", "null", "none", "unknown", "?", "unclear") else None)
+    conf = str(conf or "low").strip().lower()
+    return int(m.group(1)), name, conf if conf in ("high", "medium", "low") else "low"
+
+
 def _parse(reply: str) -> Tuple[Optional[str], List[Tuple[int, Optional[str], str]]]:
     """(show or None, [(line number, character or None, confidence)])."""
     text = reply.strip()
-    start, end = text.find("{"), text.rfind("}")
+    data: Any = None
+    # The JSON may be wrapped in prose or a code block: take the outermost object or list
+    for opening, closing in (("{", "}"), ("[", "]")):
+        start, end = text.find(opening), text.rfind(closing)
+        if 0 <= start < end:
+            try:
+                data = json.loads(text[start:end + 1])
+                break
+            except ValueError:
+                data = None
     show = None
     answers: List[Tuple[int, Optional[str], str]] = []
-    data = None
-    if 0 <= start < end:
-        try:
-            data = json.loads(text[start:end + 1])
-        except ValueError:
-            data = None
     if isinstance(data, dict):
         raw = data.get("show")
         if isinstance(raw, str) and raw.strip().lower() not in ("", "null", "unknown"):
             show = " ".join(raw.split())[:120]
-        for entry in data.get("lines") or []:
-            if isinstance(entry, dict):
-                entry = [entry.get("id") or entry.get("line"), entry.get("name") or entry.get("character"),
-                         entry.get("confidence")]
-            if not isinstance(entry, (list, tuple)) or len(entry) < 2:
-                continue
-            m = re.fullmatch(r"L?(\d+)", str(entry[0]).strip())
-            if not m:
-                continue
-            name = entry[1] if isinstance(entry[1], str) else None
-            conf = str(entry[2]).lower() if len(entry) > 2 else "low"
-            answers.append((int(m.group(1)), name, conf if conf in ("high", "medium", "low") else "low"))
+        lines = data.get("lines", data.get("attributions", data.get("answers")))
+        if lines is None:  # {"L1": "Tony", "L2": ...} with no wrapper
+            lines = {k: v for k, v in data.items() if _LINE_ID.fullmatch(str(k))}
+        data = lines
+    if isinstance(data, dict):
+        answers = [a for a in (_entry(k, v) for k, v in data.items()) if a]
+    elif isinstance(data, list):
+        answers = [a for a in (_entry(None, v) for v in data) if a]
+    if answers:
         return show, answers
     # Broken JSON (an unescaped quote...): keep every entry that can still be read
     for m in _TRIPLE.finditer(text):
         name = None if m.group(2).lower() == "null" else m.group(3)
         answers.append((int(m.group(1)), name, m.group(4).lower()))
     if not answers:
-        raise providers.ProviderError("The AI's answer wasn't the JSON asked for. Try another model.")
+        # Or plain lines: "L12: Tony Soprano (high)", "- L13 - unknown"
+        for m in _PROSE.finditer(text):
+            name = m.group(2).strip(' "*')
+            name = None if name.lower() in ("null", "none", "unknown", "?", "unclear") else name
+            answers.append((int(m.group(1)), name, (m.group(3) or "low").lower()))
+    if not answers:
+        raise NotTheJSON("The AI's answer wasn't the JSON asked for. Try another model.")
     _LOGGER.info("The AI's JSON was broken; recovered %d line answers", len(answers))
     return show, answers
 
@@ -381,7 +425,22 @@ async def _ask(conn: Dict[str, Any], options: Dict[str, Any], prompt: str, lines
             if isinstance(retry_err, providers.EmptyAnswer):
                 raise
             raise err from retry_err  # e.g. the model doesn't allow that many tokens
-    return _parse(reply)
+    try:
+        return _parse(reply)
+    except NotTheJSON:
+        # Usually after a web search (JSON mode is off then): have it restate its answer as the JSON,
+        # this time in JSON mode and without searching
+        _LOGGER.warning("The AI's answer wasn't the JSON asked for (%s…); asking it to reformat",
+                        " ".join(reply.split())[:300])
+        again = messages + [
+            {"role": "assistant", "content": reply},
+            {"role": "user", "content": "Reply again with only the JSON in the format asked for: "
+                                        '{"show": ..., "lines": [["L1", "Character name", "high"], ...]}, '
+                                        "one entry per transcript line, and nothing else."},
+        ]
+        reply = await providers.chat(conn, again, max_tokens=budget,
+                                     **{**kwargs, "web_search": False, "json_mode": True})
+        return _parse(reply)
 
 
 async def _attribute(voice: Voice, take_id: str, take: Dict[str, Any], ctx: Dict[str, Any],
