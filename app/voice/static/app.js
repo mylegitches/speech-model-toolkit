@@ -1588,6 +1588,9 @@ function renderCharacter() {
   // Rebuilding the panel (e.g. after Save) keeps you where you were in each file's list
   const scrolls = new Map([...panel.querySelectorAll('details.char-file')]
     .map((d) => [d.dataset.id, d.querySelector('.clips')?.scrollTop || 0]));
+  // Which episodes were on screen and open: a refresh keeps them as they were
+  const shown = new Set([...panel.querySelectorAll('details.char-file')].map((d) => d.dataset.id));
+  const wasOpen = new Set([...panel.querySelectorAll('details.char-file')].filter((d) => d.open).map((d) => d.dataset.id));
   const pageY = window.scrollY;
   panel.innerHTML = '';
   const files = new Set([...confirmed, ...possible].map((c) => c.take)).size;
@@ -1632,11 +1635,15 @@ function renderCharacter() {
     const box = el('section', { className: 'character-group' }, head);
     const byFile = new Map();
     clips.forEach((c) => { if (!byFile.has(c.take)) byFile.set(c.take, []); byFile.get(c.take).push(c); });
-    [...byFile.values()].forEach((fileClips, i) => {
+    [...byFile.values()].forEach((fileClips) => {
       const id = `${possibleSection ? 'p' : 'c'}:${fileClips[0].take}`;
       const details = el('details', { className: 'char-file' });
       details.dataset.id = id;
-      if (charUi.open.has(id) || (!possibleSection && i === 0 && !charUi.open.size)) details.open = true;
+      // Open: what was open before a refresh; new episodes not reviewed yet (nothing of this
+      // character saved from them) open too, so the ones just added are ready to go
+      const fresh = !possibleSection && !reviewed.has(fileClips[0].take);
+      details.open = shown.has(id) ? wasOpen.has(id) : fresh;
+      if (details.open) charUi.open.add(id);
       const label = el('span', { className: 'char-file-name', textContent: fileSummary(fileClips, ticked) });
       const refresh = () => { label.textContent = fileSummary(fileClips, ticked); updateSave(); };
       // Tick or untick a whole file, open or not. Untick all also takes its saved clips
