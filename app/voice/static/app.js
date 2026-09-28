@@ -97,6 +97,7 @@ async function selectVoice(name) {
   logCount = 0;
   $('#log-panel').textContent = '';
   renderStatus(voice.training);
+  refreshInfo();  // is another voice training right now?
   connectEvents();
 }
 
@@ -2351,6 +2352,9 @@ function renderStatus(s) {
   showError(s.state === 'failed' || s.error ? s.error || 'See the log for details.' : '');
   if (busyElsewhere && !running) {
     showError(`Another voice (${info.busy}) is training. Wait for it to finish or stop it first.`);
+    // Check again until it's free (it may just be finishing after a stop). Status updates
+    // come every second or so: don't restart a check that's already waiting.
+    if (!infoTimer) infoTimer = setTimeout(refreshInfo, 5000);
   }
 
   renderExports(s);
@@ -2489,6 +2493,7 @@ function connectEvents() {
     }
     const data = JSON.parse(e.data);
     const wasRunning = status && status.state === 'running';
+    const wasExporting = status && status.exporting;
     logCount = data.logCount;
     if (data.lines.length > 0) {
       const panel = $('#log-panel');
@@ -2498,15 +2503,26 @@ function connectEvents() {
         panel.scrollTop = panel.scrollHeight;
       }
     }
-    if (wasRunning !== (data.state === 'running')) {
+    // A stopped run still makes a usable voice from its last checkpoint: busy until that's done too
+    if (wasRunning !== (data.state === 'running') || Boolean(wasExporting) !== Boolean(data.exporting)) {
       refreshInfo();
     }
     renderStatus(data);
   };
 }
 
+let infoTimer = null;
+
+/** Which voice (if any) is training, fresh from the server; shown again right away. */
 async function refreshInfo() {
-  info = await api('api/info');
+  clearTimeout(infoTimer);
+  infoTimer = null;
+  try {
+    info = await api('api/info');
+  } catch (err) {
+    return;
+  }
+  if (status && voice) renderStatus(status);
 }
 
 // ---------------------------------------------------------------------------
