@@ -608,9 +608,10 @@ def characters(voice: Voice) -> List[Dict[str, Any]]:
 
 
 def character_clips(voice: Voice, name: str) -> Dict[str, Any]:
-    """One character's clips across all files: confirmed (AI sure, voice agrees) and possible."""
+    """One character's clips across all files: confirmed (AI sure, voice agrees) and possible.
+    Files in the order they were added, oldest first (take ids are upload timestamps)."""
     confirmed, possible = [], []
-    for take_id, take in _takes(voice):
+    for take_id, take in sorted(_takes(voice), key=lambda t: (t[1].get("created") or 0, t[0])):
         owners = take.get("groupCharacters") or {}
         for index, segment in enumerate(take["segments"]):
             character = segment.get("character")

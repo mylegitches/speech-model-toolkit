@@ -124,6 +124,17 @@ def test_characters_and_their_clips(voice, monkeypatch):
     assert "mostly Tony Soprano" in paulie["possible"][0]["reason"]
 
 
+def test_character_clips_come_oldest_file_first(voice, monkeypatch):
+    monkeypatch.setattr(identify.providers, "chat", script_ai([]))
+    asyncio.run(identify.identify(voice))
+    for take_id, created in (("t1", 200.0), ("t2", 100.0)):  # S01E02 was added before S01E01
+        data = take(voice, take_id)
+        data["created"] = created
+        freeform._write(voice.root / "freeform" / take_id, data)
+    tony = identify.character_clips(voice, "Tony Soprano")
+    assert [c["take"] for c in tony["confirmed"]] == ["t2", "t1", "t1"]
+
+
 def test_long_files_go_in_parts_with_context(voice, monkeypatch):
     monkeypatch.setattr(identify, "CHUNK", 2)
     prompts = []
