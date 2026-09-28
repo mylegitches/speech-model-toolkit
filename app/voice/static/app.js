@@ -1369,6 +1369,8 @@ function cloneStage(take) {
     return [`AI reading${ai.parts > 1 ? ` · part ${ai.part} of ${ai.parts}` : ''}`, 'pill--warn'];
   }
   if (!take.attributed) return ['Waiting for the AI', ''];
+  // Clips saved from it (of the character picked, or any): reviewed
+  if (cloneFileStats(take, charUi.name).added > 0) return ['✓ Reviewed', ''];
   return ['Ready for review', 'pill--ok'];
 }
 
@@ -1496,7 +1498,10 @@ function renderClone() {
       count((t) => t.state === 'choose_track') && `${count((t) => t.state === 'choose_track')} need an audio track choice (below)`,
       count((t) => t.state === 'error') && `${count((t) => t.state === 'error')} failed (below)`,
       count((t) => t.state === 'done' && !t.attributed) && `${count((t) => t.state === 'done' && !t.attributed)} waiting for the AI`,
-      count((t) => t.attributed) && `${count((t) => t.attributed)} ready for review`,
+      count((t) => t.attributed && !cloneFileStats(t, charUi.name).added)
+        && `${count((t) => t.attributed && !cloneFileStats(t, charUi.name).added)} ready for review`,
+      count((t) => t.attributed && cloneFileStats(t, charUi.name).added)
+        && `${count((t) => t.attributed && cloneFileStats(t, charUi.name).added)} reviewed`,
     ].filter(Boolean);
     progress.append(el('span', { textContent: bits.join(' · ') }));
     progress.append(identifyBar());
