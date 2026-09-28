@@ -1366,7 +1366,7 @@ function cloneStage(take) {
     return [`AI reading${ai.parts > 1 ? ` · part ${ai.part} of ${ai.parts}` : ''}`, 'pill--warn'];
   }
   if (!take.attributed) return ['Waiting for the AI', ''];
-  return ['Read by the AI', 'pill--ok'];
+  return ['Ready for review', 'pill--ok'];
 }
 
 /** One file's numbers for a character (or, without one, just what's in the dataset). */
@@ -1493,7 +1493,7 @@ function renderClone() {
       count((t) => t.state === 'choose_track') && `${count((t) => t.state === 'choose_track')} need an audio track choice (below)`,
       count((t) => t.state === 'error') && `${count((t) => t.state === 'error')} failed (below)`,
       count((t) => t.state === 'done' && !t.attributed) && `${count((t) => t.state === 'done' && !t.attributed)} waiting for the AI`,
-      count((t) => t.attributed) && `${count((t) => t.attributed)} read by the AI`,
+      count((t) => t.attributed) && `${count((t) => t.attributed)} ready for review`,
     ].filter(Boolean);
     progress.append(el('span', { textContent: bits.join(' · ') }));
     progress.append(identifyBar());
