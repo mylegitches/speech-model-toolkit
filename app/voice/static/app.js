@@ -1271,6 +1271,100 @@ function renderPeople() {
 // ---------------------------------------------------------------------------
 // Character clone: files -> speakers -> AI reads who says each line -> pick a character -> review
 
+const cloneUi = { filesOpen: true };
+
+/** Where a Character clone file is in the process: [text, style]. */
+function cloneStage(take) {
+  const ai = people.ai || {};
+  if (take.state === 'running') {
+    return /waiting for the other files/i.test(take.detail || '')
+      ? ['Queued', '']
+      : [`Preparing: ${take.detail || 'working…'}`, 'pill--warn'];
+  }
+  if (take.state === 'choose_track') return ['Needs an audio track choice (below)', 'pill--warn'];
+  if (take.state === 'error') return ['Failed (below)', 'pill--bad'];
+  if (people.identify?.running && ai.take === take.id) {
+    return [`AI reading${ai.parts > 1 ? ` · part ${ai.part} of ${ai.parts}` : ''}`, 'pill--warn'];
+  }
+  if (!take.attributed) return ['Waiting for the AI', ''];
+  return ['Read by the AI', 'pill--ok'];
+}
+
+/** One file's numbers for a character (or, without one, just what's in the dataset). */
+function cloneFileStats(take, name) {
+  const segments = take.segments || [];
+  const saved = segments.filter((s) => s.saved);
+  if (!name) return { added: saved.length };
+  const owners = take.groupCharacters || {};
+  const mine = segments.filter((s) => s.character === name
+    || (s.character == null && 'character' in s && owners[String(s.speaker)] === name));
+  const added = mine.filter((s) => s.saved);
+  const reviewed = added.length > 0;  // same rule as the review: saved here = file reviewed
+  return {
+    confirmed: mine.filter((s) => s.confirmed && s.character === name).length,
+    possible: mine.filter((s) => !(s.confirmed && s.character === name)).length,
+    added: added.length,
+    edited: added.filter((s) => s.savedText && s.savedText !== s.text).length,
+    leftOut: reviewed ? mine.length - added.length : 0,
+    toReview: reviewed ? 0 : mine.length,
+  };
+}
+
+/** Every Character clone file: its stage, and what the review did with it. */
+function cloneFilesTable(takes) {
+  const name = charUi.name;
+  const details = el('details', { className: 'clone-files' });
+  details.open = cloneUi.filesOpen;
+  details.addEventListener('toggle', () => { cloneUi.filesOpen = details.open; });
+  details.append(el('summary', { textContent: `Files (${takes.length})` }));
+
+  const cols = name
+    ? ['File', 'Stage', 'Lines', `${name}: ✓ / ?`, 'Added', 'Edited', 'Left out', 'To review', '']
+    : ['File', 'Stage', 'Lines', 'Added to dataset', ''];
+  const table = el('table', { className: 'clone-table' });
+  table.append(el('thead', {}, el('tr', {}, ...cols.map((c, i) => el('th', { textContent: c, className: i > 1 ? 'num' : '' })))));
+  const body = el('tbody');
+  const totals = { lines: 0, confirmed: 0, possible: 0, added: 0, edited: 0, leftOut: 0, toReview: 0 };
+  const sorted = [...takes].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, undefined, { numeric: true }));
+  sorted.forEach((take) => {
+    const [stage, style] = cloneStage(take);
+    const lines = take.state === 'done' ? (take.segments || []).length : null;
+    const s = take.state === 'done' ? cloneFileStats(take, name) : null;
+    if (lines) totals.lines += lines;
+    if (s) Object.keys(s).forEach((k) => { totals[k] += s[k]; });
+    const discard = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '✕', title: 'Discard this file' });
+    discard.addEventListener('click', async () => {
+      if (!confirm(`Discard ${take.name || 'this file'}? Clips already in the dataset stay there.`)) return;
+      try {
+        await api(voiceUrl(`/freeform/${take.id}`), { method: 'DELETE' });
+      } catch (err) {
+        SMT.showError(err.message);
+      }
+      loadTakes();
+    });
+    const num = (v) => el('td', { className: 'num', textContent: v == null ? '' : String(v) });
+    const cells = [
+      el('td', { className: 'file', textContent: take.name || take.id, title: take.name || take.id }),
+      el('td', {}, el('span', { className: `pill ${style}`, textContent: stage })),
+      num(lines),
+    ];
+    if (name) {
+      cells.push(num(s ? `${s.confirmed} / ${s.possible}` : null), num(s?.added), num(s?.edited), num(s?.leftOut), num(s?.toReview));
+    } else {
+      cells.push(num(s?.added));
+    }
+    cells.push(el('td', {}, take.state === 'running' ? '' : discard));
+    body.append(el('tr', {}, ...cells));
+  });
+  table.append(body);
+  const foot = name
+    ? ['Total', '', totals.lines, `${totals.confirmed} / ${totals.possible}`, totals.added, totals.edited, totals.leftOut, totals.toReview, '']
+    : ['Total', '', totals.lines, totals.added, ''];
+  table.append(el('tfoot', {}, el('tr', {}, ...foot.map((v, i) => el('td', { textContent: String(v), className: i > 1 ? 'num' : '' })))));
+  details.append(el('div', { className: 'table-wrap' }, table));
+  return details;
+}
+
 /** A Character clone file (or one the AI already read before that tab existed). */
 function isCloneTake(take) {
   return Boolean(take.clone || take.attributed);
@@ -1282,7 +1376,9 @@ function applyTakeFilter() {
   const byId = new Map(lastTakes.map((t) => [t.id, t]));
   document.querySelectorAll('#free-takes .take').forEach((node) => {
     const take = byId.get(node.dataset.id);
-    show(node, Boolean(take) && isCloneTake(take) === clone);
+    // Character clone: the Files table shows every file; below, only those needing you (failed, track choice)
+    const needed = !clone || ['error', 'choose_track'].includes(take?.state);
+    show(node, Boolean(take) && isCloneTake(take) === clone && needed);
   });
 }
 
@@ -1315,6 +1411,7 @@ function renderClone() {
     ].filter(Boolean);
     progress.append(el('span', { textContent: bits.join(' · ') }));
     progress.append(identifyBar());
+    progress.append(cloneFilesTable(takes));
   }
 
   const box = $('#clone-characters');
@@ -1453,6 +1550,7 @@ function renderCharacter() {
             return;
           }
           savedHere.forEach((c) => { c.saved = false; });
+          loadTakes();  // the Files table
         }
         fileClips.forEach((c) => { if (!c.saved) charUi.keep.set(clipKey(c), on); });
         const list = details.querySelector('.clips');
@@ -1517,7 +1615,7 @@ function renderCharacter() {
       SMT.showError(err.message);
     }
     openCharacter(name, true);  // shows them as saved; your ticks and edits stay
-    loadPeople();
+    loadTakes();  // the Files table's Added / Edited / Left out
   });
   panel.append(el('div', { className: 'take-foot' }, save));
   updateSave();
@@ -1560,6 +1658,7 @@ function characterClipRow(clip, ticked, changed) {
       charUi.keep.set(key, false);
       outer.replaceWith(characterClipRow(clip, ticked, changed));
       changed();
+      loadTakes();  // the Files table
       return;
     }
     charUi.keep.set(key, keep.checked);

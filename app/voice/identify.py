@@ -479,9 +479,10 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
     failed: List[str] = []
     recognised = None
     for n, (take_id, take) in enumerate(pending):
-        def progress(part: int, parts: int, n: int = n) -> None:
+        def progress(part: int, parts: int, n: int = n, take_id: str = take_id) -> None:
             _set_status(voice, state="running",
-                        detail=f"file {n + 1} of {len(pending)}" + (f" · part {part} of {parts}" if parts > 1 else ""))
+                        detail=f"file {n + 1} of {len(pending)}" + (f" · part {part} of {parts}" if parts > 1 else ""),
+                        take=take_id, part=part, parts=parts)  # which file the AI is reading (the Files table)
 
         try:
             found = await _attribute(voice, take_id, take, ctx, progress)
@@ -505,7 +506,7 @@ async def identify(voice: Voice, everyone: bool = False) -> Dict[str, Any]:
         data = speakers.load(voice)
         data["ai"] = {"state": "done", "error": None, "at": time.time(), "cast": ctx["show"] or None,
                       "identified": len(pending) - len(failed), "show": ctx["show"] or recognised or known_show,
-                      "detail": None}
+                      "detail": None, "take": None}
         if failed:
             data["ai"].update(state="error" if len(failed) == len(pending) else "done",
                               error=f"{len(failed)} of {len(pending)} files failed: {failed[-1]}")

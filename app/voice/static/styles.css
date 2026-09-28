@@ -173,6 +173,16 @@
 .clip.clip--saved.clip--edited .dur { color: #fbbf24; }
 .clip.clip--saved .dur { color: var(--accent-text); width: auto; }
 .clone-progress { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.9rem; }
+.clone-files > summary { cursor: pointer; color: var(--muted); margin: 0.2rem 0; }
+.table-wrap { overflow-x: auto; }
+.clone-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.clone-table th, .clone-table td { padding: 0.3rem 0.45rem; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+.clone-table th { color: var(--muted); font-weight: 600; }
+.clone-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.clone-table td.file { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; }
+.clone-table tfoot td { font-weight: 600; border-bottom: none; }
+.clone-table .pill { font-size: 0.75rem; }
+.clone-table .btn { padding: 0.1rem 0.4rem; min-height: 0; font-size: 0.75rem; }
 #clone-mode.dropping { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 8px; }
 .focus-banner { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; background: var(--accent-soft);
   border-radius: 8px; padding: 0.5rem 0.7rem; font-size: 0.9rem; }
