@@ -1350,7 +1350,7 @@ function renderPeople() {
 // ---------------------------------------------------------------------------
 // Character clone: files -> speakers -> AI reads who says each line -> pick a character -> review
 
-const cloneUi = { filesOpen: true };
+const cloneUi = { filesOpen: true, showChars: false };
 
 /** Where a Character clone file is in the process: [text, style]. */
 function cloneStage(take) {
@@ -1503,7 +1503,24 @@ function renderClone() {
   const box = $('#clone-characters');
   box.innerHTML = '';
   const chars = peopleUi.characters || [];
-  if (chars.length) box.append(characterList(chars));
+  const current = chars.find((c) => c.name === charUi.name);
+  if (current && current.saved > 0 && !cloneUi.showChars) {
+    // Working on one character (some clips saved): the others fold away
+    const change = el('button', { type: 'button', className: 'btn btn--secondary', textContent: 'Change character' });
+    change.addEventListener('click', () => { cloneUi.showChars = true; renderClone(); });
+    box.append(el('div', { className: 'character-current' },
+      el('span', { className: 'hint', textContent: 'Character:' }),
+      el('strong', { textContent: current.name }),
+      el('span', { className: 'hint', textContent: `${current.confirmed} ✓ · ${current.possible} ? · ${current.saved} saved` }),
+      change));
+  } else if (chars.length) {
+    box.append(characterList(chars));
+    if (current && current.saved > 0) {
+      const hide = el('button', { type: 'button', className: 'btn btn--ghost', textContent: `Keep ${current.name}` });
+      hide.addEventListener('click', () => { cloneUi.showChars = false; renderClone(); });
+      box.querySelector('.character-list').append(hide);
+    }
+  }
   // Come back to the character picked last time
   if (!charUi.name && chars.length) {
     let saved = '';
@@ -1523,7 +1540,10 @@ function characterList(chars) {
       title: `${c.confirmed} confirmed clips (${clock(c.seconds)}), ${c.possible} possible, in ${c.files} file${c.files === 1 ? '' : 's'}`
         + (c.saved ? ` · ${c.saved} already saved` : ''),
     });
-    chip.addEventListener('click', () => (charUi.name === c.name ? closeCharacter() : openCharacter(c.name)));
+    chip.addEventListener('click', () => {
+      cloneUi.showChars = false;  // picked: the list folds away again (once there are saves)
+      if (charUi.name === c.name) closeCharacter(); else openCharacter(c.name);
+    });
     box.append(chip);
   });
   return box;
