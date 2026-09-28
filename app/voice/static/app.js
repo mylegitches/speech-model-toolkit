@@ -2907,11 +2907,16 @@ function managerRow(clip, changed) {
 const player = { queue: [], index: 0, playing: false, timer: null, box: null, audio: null, mode: null };
 
 const MANAGER = {
+  name: 'manager',
+  filters: [
+    ['kept', 'Not marked', (clip) => !manageUi.deleted.has(clip.id)],
+    ['all', 'All clips', () => true],
+    ['marked', 'Marked for deletion', (clip) => manageUi.deleted.has(clip.id)],
+  ],
   toggleLabel: '🗑 Mark',
   toggleTitle: 'Mark this clip for deletion, with Save changes (D)',
   keys: 'Space pause/play · ← → previous/next · D mark for deletion · F fix the words · Esc close',
   row: (clip) => document.querySelector(`#manage-list .clip[data-id="${CSS.escape(clip.id)}"]`),
-  skip: (clip) => manageUi.deleted.has(clip.id),
   text: (clip) => manageUi.edits.get(clip.id) ?? clip.text,
   audio: (clip) => {
     const [group, stem] = clip.id.split('/');
@@ -2931,11 +2936,16 @@ const MANAGER = {
 };
 
 const REVIEW = {
+  name: 'review',
+  filters: [
+    ['all', 'All clips', () => true],
+    ['saved', 'Saved to the dataset', (clip) => clip.saved],
+    ['unsaved', 'Not saved (left out or not reviewed)', (clip) => !clip.saved],
+  ],
   toggleLabel: '✓ In / out',
   toggleTitle: 'Take this clip in, or leave it out; a saved clip comes back out of the dataset (D)',
   keys: 'Space pause/play · ← → previous/next · D take in / leave out · F fix the words · Esc close',
   row: (clip) => document.querySelector(`#character-panel .clip[data-key="${CSS.escape(clipKey(clip))}"]`),
-  skip: () => false,
   text: (clip) => charUi.text.get(clipKey(clip)) ?? clip.text,
   audio: (clip) => voiceUrl(`/freeform/${clip.take}/clips/${clip.index}.wav?denoise=${clip.denoise}`),
   badge: (clip) => (clip.saved ? ['✓ Saved', 'ok'] : charUi.ticked?.(clip) ? ['Will be saved', 'ok'] : ['Left out', 'bad']),
@@ -2976,6 +2986,7 @@ function buildPlayer() {
   delay.value = String(playerDelay());
   delay.addEventListener('change', () => {
     try { localStorage.setItem('voice.playDelay', delay.value); } catch (e) { /* ignore */ }
+    box.focus();  // the keys work again straight away
   });
   const box = el('div', { className: 'player hidden', tabIndex: -1 });
   const button = (text, title, onClick, className = '') => {
@@ -3000,6 +3011,7 @@ function buildPlayer() {
     button('⏸', 'Pause / play (Space)', () => playerToggle(), 'player-play'),
     button('⏭', 'Next clip (→)', () => playerGo(player.index + 1)),
     el('span', { className: 'player-pos' }),
+    el('label', { className: 'player-delay' }, 'Play ', el('select', { className: 'player-filter', title: 'Which clips to play' })),
     el('label', { className: 'player-delay' }, 'Pause between clips ', delay),
     el('span', { className: 'grow' }),
     button('', '', () => playerMark(), 'player-toggle'),
@@ -3007,6 +3019,12 @@ function buildPlayer() {
     button('✕', 'Close (Esc)', () => stopPlayer()));
   const keys = el('div', { className: 'player-keys hint' });
   box.append(screen, bar, controls, keys, audio);
+  const filter = controls.querySelector('.player-filter');
+  filter.addEventListener('change', () => {
+    try { localStorage.setItem(`voice.playFilter.${player.mode.name}`, filter.value); } catch (e) { /* ignore */ }
+    applyPlayerFilter(player.queue[player.index]?.clip);
+    box.focus();
+  });
   document.body.append(box);
   audio.addEventListener('ended', () => {
     if (!player.playing) return;
@@ -3035,13 +3053,19 @@ function buildPlayer() {
   player.audio = audio;
 }
 
-/** Play clips [{clip, from}] one after another; mode: MANAGER or REVIEW. */
-function startPlayer(queue, mode = MANAGER) {
-  const list = queue.filter(({ clip }) => !mode.skip(clip));
-  if (!list.length) return;
+/** Play clips [{clip, from}] one after another; mode: MANAGER or REVIEW. The Play choice
+ *  (all, saved, not saved...) picks which of them. */
+function startPlayer(source, mode = MANAGER) {
+  if (!source.length) return;
   if (!player.box) buildPlayer();
   player.mode = mode;
-  player.queue = list;
+  player.source = source;
+  const filter = player.box.querySelector('.player-filter');
+  filter.innerHTML = '';
+  mode.filters.forEach(([value, label]) => filter.add(new Option(label, value)));
+  let remembered = null;
+  try { remembered = localStorage.getItem(`voice.playFilter.${mode.name}`); } catch (e) { /* ignore */ }
+  filter.value = mode.filters.some(([value]) => value === remembered) ? remembered : mode.filters[0][0];
   const toggle = player.box.querySelector('.player-toggle');
   toggle.textContent = mode.toggleLabel;
   toggle.title = mode.toggleTitle;
@@ -3049,7 +3073,32 @@ function startPlayer(queue, mode = MANAGER) {
   show(player.box, true);
   document.body.classList.add('player-open');
   player.box.focus();
-  playerGo(0);
+  applyPlayerFilter(null);
+}
+
+/** Rebuild the queue for the Play choice; keep playing the current clip if it's still in. */
+function applyPlayerFilter(current) {
+  const value = player.box.querySelector('.player-filter').value;
+  const test = (player.mode.filters.find(([v]) => v === value) || player.mode.filters[0])[2];
+  player.queue = player.source.filter(({ clip }) => test(clip));
+  if (!player.queue.length) {
+    clearTimeout(player.timer);
+    player.playing = false;
+    player.audio.pause();
+    player.box.querySelector('.player-play').textContent = '▶';
+    player.box.querySelector('.player-subtitle').textContent = 'No clips to play here: choose another “Play” option.';
+    player.box.querySelector('.player-pos').textContent = '0 of 0';
+    player.box.querySelector('.player-badge').className = 'player-badge hidden';
+    player.box.classList.remove('player--marked');
+    return;
+  }
+  const at = current ? player.queue.findIndex((entry) => entry.clip === current) : -1;
+  if (at >= 0) {
+    player.index = at;
+    player.box.querySelector('.player-pos').textContent = `${at + 1} of ${player.queue.length}`;
+  } else {
+    playerGo(0);
+  }
 }
 
 function stopPlayer() {
