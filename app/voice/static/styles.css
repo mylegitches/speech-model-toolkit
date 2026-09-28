@@ -182,8 +182,8 @@
 .clone-table th { color: var(--muted); font-weight: 600; }
 .clone-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .clone-table td.file { max-width: 26rem; overflow: hidden; text-overflow: ellipsis; }
-.clone-table td.stage { white-space: normal; min-width: 9rem; max-width: 15rem; }
-.clone-table td.stage .pill { display: inline-block; white-space: normal; line-height: 1.3; }
+.clone-table td.file-stage { white-space: normal; min-width: 9rem; max-width: 15rem; }
+.clone-table td.file-stage .pill { display: inline-block; white-space: normal; line-height: 1.3; }
 /* Build Dataset: wide enough for the Files table and long episode names */
 html[data-view="dataset"] .container { max-width: 1180px; }
 .clone-table tfoot td { font-weight: 600; border-bottom: none; }

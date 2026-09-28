@@ -1425,7 +1425,7 @@ function cloneFilesTable(takes) {
     const num = (v) => el('td', { className: 'num', textContent: v == null ? '' : String(v) });
     const cells = [
       el('td', { className: 'file', textContent: take.name || take.id, title: take.name || take.id }),
-      el('td', { className: 'stage' }, el('span', { className: `pill ${style}`, textContent: stage })),
+      el('td', { className: 'file-stage' }, el('span', { className: `pill ${style}`, textContent: stage })),
       num(lines),
     ];
     if (name) {
