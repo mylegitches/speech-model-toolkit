@@ -1445,6 +1445,12 @@ function cloneFilesTable(takes) {
   return details;
 }
 
+/** Character clone files the AI still has to read (with an AI connected). */
+function awaitingAi(takes) {
+  return Boolean(people.identify?.connected)
+    && takes.some((t) => isCloneTake(t) && t.state === 'done' && !t.attributed);
+}
+
 /** A Character clone file (or one the AI already read before that tab existed). */
 function isCloneTake(take) {
   return Boolean(take.clone || take.attributed);
@@ -1802,7 +1808,14 @@ async function loadTakes() {
     // Something is waiting for review: show it where it came from
     setMode(takes.some((t) => t.tracks && t.source && !/^source\.(webm|ogg|m4a)$/.test(t.source)) ? 'file' : 'free');
   }
-  if (takes.some((t) => t.state === 'running')) takesTimer = setTimeout(loadTakes, 2000);
+  if (takes.some((t) => t.state === 'running')) {
+    takesTimer = setTimeout(loadTakes, 2000);
+  } else if (awaitingAi(takes)) {
+    // Prepared, and the AI picks it up next on the server: keep watching until it has been read
+    // (more slowly after a failed run: a new file or 🔎 Identify with AI starts it again)
+    const failed = people.ai?.state === 'error' && !people.identify?.running;
+    takesTimer = setTimeout(loadTakes, failed ? 15000 : 4000);
+  }
   updatePending(takes);
 }
 
