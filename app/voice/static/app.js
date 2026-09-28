@@ -487,6 +487,9 @@ document.addEventListener('keydown', (e) => {
   if (recordMode !== 'prompts') {
     return;  // shortcuts are for reading prompts
   }
+  if (player.box && !player.box.classList.contains('hidden')) {
+    return;  // the play-through has its own keys
+  }
   const key = e.key.toLowerCase();
   const actions = { r: '#record-btn', p: '#play-btn', s: '#save-btn', k: '#skip-btn' };
   if (actions[key] && !$(actions[key]).disabled) {
@@ -2799,20 +2802,28 @@ function renderManager() {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(c);
   });
-  [...groups.entries()]
-    .sort((a, b) => groupLabel(a[0]).localeCompare(groupLabel(b[0]), undefined, { numeric: true }))
-    .forEach(([key, list]) => {
+  const sortedGroups = [...groups.entries()]
+    .sort((a, b) => groupLabel(a[0]).localeCompare(groupLabel(b[0]), undefined, { numeric: true }));
+  // Play through: the clips listed, in the order shown
+  manageUi.order = sortedGroups.flatMap(([key, list]) => list.map((clip) => ({ clip, from: groupLabel(key) })));
+  sortedGroups.forEach(([key, list]) => {
       const details = el('details', { className: 'manage-group' });
       details.open = manageUi.open.has(key) || Boolean(needle);
-      const summary = el('summary');
+      const label = el('span', { className: 'grow' });
       const describe = () => {
         const changed = list.filter((c) => manageUi.edits.has(c.id)).length;
         const gone = list.filter((c) => manageUi.deleted.has(c.id)).length;
-        summary.textContent = [groupLabel(key), `${list.length} clip${list.length === 1 ? '' : 's'}`,
+        label.textContent = [groupLabel(key), `${list.length} clip${list.length === 1 ? '' : 's'}`,
           changed && `${changed} edited`, gone && `${gone} to delete`].filter(Boolean).join(' · ');
       };
       describe();
-      details.append(summary);
+      const playGroup = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '▶ Play', title: 'Play this group through' });
+      playGroup.addEventListener('click', (e) => {
+        e.preventDefault();  // not open/close the group
+        e.stopPropagation();
+        startPlayer(list.map((clip) => ({ clip, from: groupLabel(key) })));
+      });
+      details.append(el('summary', { className: 'manage-summary' }, label, playGroup));
       const fill = () => {
         if (details.dataset.filled) return;
         details.dataset.filled = '1';
@@ -2856,8 +2867,216 @@ function managerRow(clip, changed) {
   row.classList.toggle('clip--changed', manageUi.edits.has(clip.id));
   mark();
   row.append(play, text, el('span', { className: 'dur', textContent: clip.seconds ? `${clip.seconds.toFixed(1)}s` : '' }), remove);
+  row.dataset.id = clip.id;
+  // The player marks or corrects clips too: bring this row (and its group's counts) up to date
+  row.sync = () => {
+    text.value = manageUi.edits.get(clip.id) ?? clip.text;
+    row.classList.toggle('clip--changed', manageUi.edits.has(clip.id));
+    mark();
+    changed();
+  };
   return row;
 }
+
+// ---- Play through: every clip, one after another, with its words ------------------------
+
+const player = { queue: [], index: 0, playing: false, timer: null, box: null, audio: null };
+
+function playerDelay() {
+  try { return Number(localStorage.getItem('voice.playDelay') ?? 1); } catch (e) { return 1; }
+}
+
+function buildPlayer() {
+  const audio = el('audio');
+  const delay = el('select', { title: 'Pause between clips' },
+    ...[0, 0.5, 1, 2, 3, 5].map((s) => new Option(s ? `${s} s` : 'none', String(s))));
+  delay.value = String(playerDelay());
+  delay.addEventListener('change', () => {
+    try { localStorage.setItem('voice.playDelay', delay.value); } catch (e) { /* ignore */ }
+  });
+  const box = el('div', { className: 'player hidden', tabIndex: -1 });
+  const button = (text, title, onClick) => {
+    const b = el('button', { type: 'button', className: 'btn btn--secondary', textContent: text, title });
+    b.addEventListener('click', () => {
+      onClick();
+      // Keys go to the player again (Space shouldn't also "click" this button)
+      if (!box.querySelector('.player-edit:focus')) box.focus();
+    });
+    return b;
+  };
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-label', 'Play through the dataset');
+  const screen = el('div', { className: 'player-screen' },
+    el('div', { className: 'player-from' }),
+    el('div', { className: 'player-subtitle' }),
+    el('input', { type: 'text', className: 'player-edit hidden' }));
+  const bar = el('div', { className: 'player-bar' }, el('div', { className: 'player-fill' }));
+  const controls = el('div', { className: 'player-controls' },
+    button('⏮', 'Previous clip (←)', () => playerGo(player.index - 1)),
+    button('⏸', 'Pause / play (Space)', () => playerToggle()),
+    button('⏭', 'Next clip (→)', () => playerGo(player.index + 1)),
+    el('span', { className: 'player-pos' }),
+    el('label', { className: 'player-delay' }, 'Pause between clips ', delay),
+    el('span', { className: 'grow' }),
+    button('🗑 Mark', 'Mark this clip for deletion, with Save changes (D)', () => playerMark()),
+    button('✎ Fix', 'Correct the words: pauses; Enter keeps the change and plays on, Esc cancels (F)', () => playerEdit()),
+    button('✕', 'Close (Esc)', () => stopPlayer()));
+  const keys = el('div', { className: 'player-keys hint',
+    textContent: 'Space pause/play · ← → previous/next · D mark for deletion · F fix the words · Esc close' });
+  box.append(screen, bar, controls, keys, audio);
+  document.body.append(box);
+  audio.addEventListener('ended', () => {
+    if (!player.playing) return;
+    clearTimeout(player.timer);
+    player.timer = setTimeout(() => playerGo(player.index + 1), Number(delay.value) * 1000);
+  });
+  audio.addEventListener('timeupdate', () => {
+    const part = audio.duration ? audio.currentTime / audio.duration : 0;
+    box.querySelector('.player-fill').style.width = `${((player.index + part) / player.queue.length) * 100}%`;
+  });
+  audio.addEventListener('error', () => { if (player.playing) playerGo(player.index + 1); });  // skip unreadable clips
+  const edit = screen.querySelector('.player-edit');
+  edit.addEventListener('keydown', (e) => {
+    // Done editing: the keys go back to the player
+    if (e.key === 'Enter') { e.preventDefault(); playerSaveEdit(); box.focus(); playerToggle(true); }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      edit.classList.add('hidden');
+      screen.querySelector('.player-subtitle').classList.remove('hidden');
+      box.focus();
+    }
+  });
+  edit.addEventListener('blur', () => playerSaveEdit());
+  player.box = box;
+  player.audio = audio;
+}
+
+function startPlayer(queue) {
+  const list = queue.filter(({ clip }) => !manageUi.deleted.has(clip.id));
+  if (!list.length) return;
+  if (!player.box) buildPlayer();
+  player.queue = list;
+  show(player.box, true);
+  document.body.classList.add('player-open');
+  player.box.focus();
+  playerGo(0);
+}
+
+function stopPlayer() {
+  if (!player.box) return;
+  clearTimeout(player.timer);
+  player.playing = false;
+  player.audio.pause();
+  show(player.box, false);
+  document.body.classList.remove('player-open');
+  document.querySelectorAll('#manage-list .clip--playing').forEach((r) => r.classList.remove('clip--playing'));
+}
+
+function playerRow(clip) {
+  return document.querySelector(`#manage-list .clip[data-id="${CSS.escape(clip.id)}"]`);
+}
+
+function playerGo(index) {
+  clearTimeout(player.timer);
+  if (index < 0) index = 0;
+  if (index >= player.queue.length) {  // the end
+    player.playing = false;
+    player.box.querySelector('.player-controls button:nth-child(2)').textContent = '▶';
+    player.box.querySelector('.player-subtitle').textContent = `Done: ${player.queue.length} clips.`;
+    player.box.querySelector('.player-fill').style.width = '100%';
+    return;
+  }
+  player.index = index;
+  const { clip, from } = player.queue[index];
+  const box = player.box;
+  box.querySelector('.player-from').textContent = from;
+  const subtitle = box.querySelector('.player-subtitle');
+  subtitle.textContent = manageUi.edits.get(clip.id) ?? clip.text;
+  subtitle.classList.remove('hidden');
+  box.querySelector('.player-edit').classList.add('hidden');
+  box.classList.toggle('player--marked', manageUi.deleted.has(clip.id));
+  box.querySelector('.player-pos').textContent = `${index + 1} of ${player.queue.length}`;
+  document.querySelectorAll('#manage-list .clip--playing').forEach((r) => r.classList.remove('clip--playing'));
+  const row = playerRow(clip);
+  if (row) {
+    row.classList.add('clip--playing');
+    row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+  const [group, stem] = clip.id.split('/');
+  player.audio.src = voiceUrl(`/dataset/audio/${encodeURIComponent(group)}/${encodeURIComponent(stem)}`);
+  player.playing = true;
+  box.querySelector('.player-controls button:nth-child(2)').textContent = '⏸';
+  SMT.applyOutput(player.audio).then(() => player.audio.play()).catch(() => {});
+}
+
+function playerToggle(forcePlay) {
+  if (!player.box) return;
+  const play = forcePlay ?? !player.playing;
+  const button = player.box.querySelector('.player-controls button:nth-child(2)');
+  if (play) {
+    if (player.index >= player.queue.length || player.audio.ended) { playerGo(player.index + (player.audio.ended ? 1 : 0)); return; }
+    player.playing = true;
+    button.textContent = '⏸';
+    player.audio.play().catch(() => {});
+  } else {
+    player.playing = false;
+    clearTimeout(player.timer);
+    button.textContent = '▶';
+    player.audio.pause();
+  }
+}
+
+function playerMark() {
+  const entry = player.queue[player.index];
+  if (!entry) return;
+  const { clip } = entry;
+  if (manageUi.deleted.has(clip.id)) manageUi.deleted.delete(clip.id); else manageUi.deleted.add(clip.id);
+  player.box.classList.toggle('player--marked', manageUi.deleted.has(clip.id));
+  playerRow(clip)?.sync?.();
+  updateManagerSave();
+}
+
+function playerEdit() {
+  const entry = player.queue[player.index];
+  if (!entry) return;
+  playerToggle(false);
+  const edit = player.box.querySelector('.player-edit');
+  edit.value = manageUi.edits.get(entry.clip.id) ?? entry.clip.text;
+  edit.dataset.id = entry.clip.id;
+  player.box.querySelector('.player-subtitle').classList.add('hidden');
+  edit.classList.remove('hidden');
+  edit.focus();
+}
+
+function playerSaveEdit() {
+  const edit = player.box.querySelector('.player-edit');
+  if (edit.classList.contains('hidden')) return;
+  const entry = player.queue.find(({ clip }) => clip.id === edit.dataset.id);
+  if (entry) {
+    const value = edit.value.trim();
+    if (value && value !== entry.clip.text) manageUi.edits.set(entry.clip.id, value);
+    else manageUi.edits.delete(entry.clip.id);
+    player.box.querySelector('.player-subtitle').textContent = manageUi.edits.get(entry.clip.id) ?? entry.clip.text;
+    playerRow(entry.clip)?.sync?.();
+    updateManagerSave();
+  }
+  edit.classList.add('hidden');
+  player.box.querySelector('.player-subtitle').classList.remove('hidden');
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!player.box || player.box.classList.contains('hidden') || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target instanceof Element && e.target.matches('input, textarea, select')) return;
+  if (e.key === ' ') { e.preventDefault(); playerToggle(); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); playerGo(player.index + 1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); playerGo(player.index - 1); }
+  else if (e.key === 'd' || e.key === 'D' || e.key === 'Delete') { e.preventDefault(); playerMark(); }
+  else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); playerEdit(); }
+  else if (e.key === 'Escape') { e.preventDefault(); stopPlayer(); }
+});
+
+$('#manage-play').addEventListener('click', () => startPlayer(manageUi.order || []));
 
 function playDatasetClip(clip, button) {
   const audio = $('#clip-audio');
