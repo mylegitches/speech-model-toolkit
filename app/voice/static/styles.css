@@ -273,8 +273,11 @@ html[data-view="voices"] #device-banner { display: none !important; }
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9); max-width: 95%; }
 .player-edit { width: 100%; font-size: 1.1rem; text-align: center; }
 .player--marked .player-screen { outline: 2px solid var(--danger); }
-.player--marked .player-screen::after { content: 'Marked for deletion'; position: absolute; top: 0.5rem; right: 0.6rem;
-  background: rgba(239, 68, 68, 0.85); color: #fff; font-size: 0.72rem; padding: 0.1rem 0.45rem; border-radius: 99px; }
+.player-badge { position: absolute; top: 0.5rem; right: 0.6rem; color: #fff; font-size: 0.72rem;
+  padding: 0.1rem 0.5rem; border-radius: 99px; }
+.player-badge--bad { background: rgba(239, 68, 68, 0.85); }
+.player-badge--ok { background: rgba(9, 91, 27, 0.9); }
+.player-from { padding-right: 9rem; }
 .player--marked .player-subtitle { text-decoration: line-through; opacity: 0.6; }
 .player-bar { height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
 .player-fill { height: 100%; width: 0; background: var(--accent-text); transition: width 0.25s linear; }

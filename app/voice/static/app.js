@@ -1629,6 +1629,7 @@ function renderCharacter() {
   // so what wasn't saved there was left out on purpose: unticked.
   const reviewed = new Set([...confirmed, ...possible].filter((c) => c.saved).map((c) => c.take));
   const ticked = (clip) => charUi.keep.get(clipKey(clip)) ?? (!clip.possible && !reviewed.has(clip.take));
+  charUi.ticked = ticked;  // the player shows and changes the same state
 
   const section = (title, clips, possibleSection) => {
     if (!clips.length) return;
@@ -1639,7 +1640,10 @@ function renderCharacter() {
       clips.forEach((c) => { if (!c.saved) charUi.keep.set(clipKey(c), possibleSection); });
       renderCharacter();
     });
-    head.append(all);
+    const playAll = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '▶ Play all',
+      title: `Listen to all ${title.toLowerCase()} clips, episode by episode` });
+    playAll.addEventListener('click', () => startPlayer(clips.map((clip) => ({ clip, from: `${clip.file} · ${title}` })), REVIEW));
+    head.append(playAll, all);
     const box = el('section', { className: 'character-group' }, head);
     const byFile = new Map();
     clips.forEach((c) => { if (!byFile.has(c.take)) byFile.set(c.take, []); byFile.get(c.take).push(c); });
@@ -1688,7 +1692,14 @@ function renderCharacter() {
       const untickAll = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Untick all',
         title: 'Untick every clip of this file, and take its saved clips out of the dataset' });
       untickAll.addEventListener('click', tickFile(false));
-      const tools = el('span', { className: 'char-file-tools' }, tickAll, untickAll);
+      const playFile = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '▶ Play',
+        title: 'Listen to this episode\'s clips one after another; D takes one in or leaves it out, F fixes the words' });
+      playFile.addEventListener('click', (e) => {
+        e.preventDefault();  // not open/close the episode
+        e.stopPropagation();
+        startPlayer(fileClips.map((clip) => ({ clip, from: `${clip.file} · ${title}` })), REVIEW);
+      });
+      const tools = el('span', { className: 'char-file-tools' }, playFile, tickAll, untickAll);
       details.append(el('summary', {}, label, tools));
       const fill = () => {
         if (details.dataset.filled) return;
@@ -1808,6 +1819,12 @@ function characterClipRow(clip, ticked, changed) {
   const outer = clip.reason
     ? el('div', { className: 'clip-with-reason' }, row, el('small', { className: 'hint', textContent: clip.reason }))
     : row;
+  // The player takes clips in / leaves them out and fixes words: redraw this row to match
+  row.dataset.key = key;
+  row.rerender = () => {
+    outer.replaceWith(characterClipRow(clip, ticked, changed));
+    changed();
+  };
   return outer;
 }
 
@@ -2884,8 +2901,69 @@ function managerRow(clip, changed) {
 }
 
 // ---- Play through: every clip, one after another, with its words ------------------------
+// One player for two lists: the clips in the dataset (MANAGER: D marks for deletion) and a
+// character's review (REVIEW: D takes a clip in or leaves it out). F fixes the words in both.
 
-const player = { queue: [], index: 0, playing: false, timer: null, box: null, audio: null };
+const player = { queue: [], index: 0, playing: false, timer: null, box: null, audio: null, mode: null };
+
+const MANAGER = {
+  toggleLabel: '🗑 Mark',
+  toggleTitle: 'Mark this clip for deletion, with Save changes (D)',
+  keys: 'Space pause/play · ← → previous/next · D mark for deletion · F fix the words · Esc close',
+  row: (clip) => document.querySelector(`#manage-list .clip[data-id="${CSS.escape(clip.id)}"]`),
+  skip: (clip) => manageUi.deleted.has(clip.id),
+  text: (clip) => manageUi.edits.get(clip.id) ?? clip.text,
+  audio: (clip) => {
+    const [group, stem] = clip.id.split('/');
+    return voiceUrl(`/dataset/audio/${encodeURIComponent(group)}/${encodeURIComponent(stem)}`);
+  },
+  badge: (clip) => (manageUi.deleted.has(clip.id) ? ['Marked for deletion', 'bad'] : null),
+  toggle(clip) {
+    if (manageUi.deleted.has(clip.id)) manageUi.deleted.delete(clip.id); else manageUi.deleted.add(clip.id);
+    this.row(clip)?.sync?.();
+    updateManagerSave();
+  },
+  setText(clip, value) {
+    if (value && value !== clip.text) manageUi.edits.set(clip.id, value); else manageUi.edits.delete(clip.id);
+    this.row(clip)?.sync?.();
+    updateManagerSave();
+  },
+};
+
+const REVIEW = {
+  toggleLabel: '✓ In / out',
+  toggleTitle: 'Take this clip in, or leave it out; a saved clip comes back out of the dataset (D)',
+  keys: 'Space pause/play · ← → previous/next · D take in / leave out · F fix the words · Esc close',
+  row: (clip) => document.querySelector(`#character-panel .clip[data-key="${CSS.escape(clipKey(clip))}"]`),
+  skip: () => false,
+  text: (clip) => charUi.text.get(clipKey(clip)) ?? clip.text,
+  audio: (clip) => voiceUrl(`/freeform/${clip.take}/clips/${clip.index}.wav?denoise=${clip.denoise}`),
+  badge: (clip) => (clip.saved ? ['✓ Saved', 'ok'] : charUi.ticked?.(clip) ? ['Will be saved', 'ok'] : ['Left out', 'bad']),
+  async toggle(clip) {
+    const key = clipKey(clip);
+    if (clip.saved) {
+      // Out of the dataset right away, like unticking a green clip
+      try {
+        const result = await postJson(voiceUrl('/clips/unsave'), { clips: [{ take: clip.take, index: clip.index }] });
+        updateRecorded(result.recorded);
+      } catch (err) {
+        SMT.showError(err.message);
+        return;
+      }
+      clip.saved = false;
+      charUi.keep.set(key, false);
+      loadTakes();  // the Files table
+    } else {
+      charUi.keep.set(key, !charUi.ticked(clip));
+    }
+    this.row(clip)?.rerender?.();
+  },
+  setText(clip, value) {
+    const key = clipKey(clip);
+    if (value && value !== clip.text) charUi.text.set(key, value); else charUi.text.delete(key);
+    this.row(clip)?.rerender?.();
+  },
+};
 
 function playerDelay() {
   try { return Number(localStorage.getItem('voice.playDelay') ?? 1); } catch (e) { return 1; }
@@ -2900,34 +2978,34 @@ function buildPlayer() {
     try { localStorage.setItem('voice.playDelay', delay.value); } catch (e) { /* ignore */ }
   });
   const box = el('div', { className: 'player hidden', tabIndex: -1 });
-  const button = (text, title, onClick) => {
-    const b = el('button', { type: 'button', className: 'btn btn--secondary', textContent: text, title });
+  const button = (text, title, onClick, className = '') => {
+    const b = el('button', { type: 'button', className: `btn btn--secondary ${className}`, textContent: text, title });
     b.addEventListener('click', () => {
       onClick();
-      // Keys go to the player again (Space shouldn't also "click" this button)
+      // Keys go to the player again (Space mustn't also "click" this button)
       if (!box.querySelector('.player-edit:focus')) box.focus();
     });
     return b;
   };
   box.setAttribute('role', 'dialog');
-  box.setAttribute('aria-label', 'Play through the dataset');
+  box.setAttribute('aria-label', 'Play through the clips');
   const screen = el('div', { className: 'player-screen' },
     el('div', { className: 'player-from' }),
+    el('span', { className: 'player-badge hidden' }),
     el('div', { className: 'player-subtitle' }),
     el('input', { type: 'text', className: 'player-edit hidden' }));
   const bar = el('div', { className: 'player-bar' }, el('div', { className: 'player-fill' }));
   const controls = el('div', { className: 'player-controls' },
     button('⏮', 'Previous clip (←)', () => playerGo(player.index - 1)),
-    button('⏸', 'Pause / play (Space)', () => playerToggle()),
+    button('⏸', 'Pause / play (Space)', () => playerToggle(), 'player-play'),
     button('⏭', 'Next clip (→)', () => playerGo(player.index + 1)),
     el('span', { className: 'player-pos' }),
     el('label', { className: 'player-delay' }, 'Pause between clips ', delay),
     el('span', { className: 'grow' }),
-    button('🗑 Mark', 'Mark this clip for deletion, with Save changes (D)', () => playerMark()),
+    button('', '', () => playerMark(), 'player-toggle'),
     button('✎ Fix', 'Correct the words: pauses; Enter keeps the change and plays on, Esc cancels (F)', () => playerEdit()),
     button('✕', 'Close (Esc)', () => stopPlayer()));
-  const keys = el('div', { className: 'player-keys hint',
-    textContent: 'Space pause/play · ← → previous/next · D mark for deletion · F fix the words · Esc close' });
+  const keys = el('div', { className: 'player-keys hint' });
   box.append(screen, bar, controls, keys, audio);
   document.body.append(box);
   audio.addEventListener('ended', () => {
@@ -2957,11 +3035,17 @@ function buildPlayer() {
   player.audio = audio;
 }
 
-function startPlayer(queue) {
-  const list = queue.filter(({ clip }) => !manageUi.deleted.has(clip.id));
+/** Play clips [{clip, from}] one after another; mode: MANAGER or REVIEW. */
+function startPlayer(queue, mode = MANAGER) {
+  const list = queue.filter(({ clip }) => !mode.skip(clip));
   if (!list.length) return;
   if (!player.box) buildPlayer();
+  player.mode = mode;
   player.queue = list;
+  const toggle = player.box.querySelector('.player-toggle');
+  toggle.textContent = mode.toggleLabel;
+  toggle.title = mode.toggleTitle;
+  player.box.querySelector('.player-keys').textContent = mode.keys;
   show(player.box, true);
   document.body.classList.add('player-open');
   player.box.focus();
@@ -2975,21 +3059,40 @@ function stopPlayer() {
   player.audio.pause();
   show(player.box, false);
   document.body.classList.remove('player-open');
-  document.querySelectorAll('#manage-list .clip--playing').forEach((r) => r.classList.remove('clip--playing'));
+  document.querySelectorAll('.clip--playing').forEach((r) => r.classList.remove('clip--playing'));
 }
 
-function playerRow(clip) {
-  return document.querySelector(`#manage-list .clip[data-id="${CSS.escape(clip.id)}"]`);
+/** The clip's state on the screen: marked for deletion, saved, will be saved, left out. */
+function playerBadge() {
+  const entry = player.queue[player.index];
+  const badge = player.box.querySelector('.player-badge');
+  const state = entry && player.mode.badge(entry.clip);
+  badge.textContent = state ? state[0] : '';
+  badge.className = `player-badge${state ? ` player-badge--${state[1]}` : ' hidden'}`;
+  player.box.classList.toggle('player--marked', state?.[1] === 'bad');
+  if (entry) highlightRow(entry.clip);
+}
+
+function highlightRow(clip) {
+  document.querySelectorAll('.clip--playing').forEach((r) => r.classList.remove('clip--playing'));
+  const row = player.mode.row(clip);
+  if (row) {
+    row.classList.add('clip--playing');
+    row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
 }
 
 function playerGo(index) {
   clearTimeout(player.timer);
   if (index < 0) index = 0;
+  const play = player.box.querySelector('.player-play');
   if (index >= player.queue.length) {  // the end
     player.playing = false;
-    player.box.querySelector('.player-controls button:nth-child(2)').textContent = '▶';
+    play.textContent = '▶';
     player.box.querySelector('.player-subtitle').textContent = `Done: ${player.queue.length} clips.`;
     player.box.querySelector('.player-fill').style.width = '100%';
+    player.box.querySelector('.player-badge').className = 'player-badge hidden';
+    player.box.classList.remove('player--marked');
     return;
   }
   player.index = index;
@@ -2997,28 +3100,21 @@ function playerGo(index) {
   const box = player.box;
   box.querySelector('.player-from').textContent = from;
   const subtitle = box.querySelector('.player-subtitle');
-  subtitle.textContent = manageUi.edits.get(clip.id) ?? clip.text;
+  subtitle.textContent = player.mode.text(clip);
   subtitle.classList.remove('hidden');
   box.querySelector('.player-edit').classList.add('hidden');
-  box.classList.toggle('player--marked', manageUi.deleted.has(clip.id));
   box.querySelector('.player-pos').textContent = `${index + 1} of ${player.queue.length}`;
-  document.querySelectorAll('#manage-list .clip--playing').forEach((r) => r.classList.remove('clip--playing'));
-  const row = playerRow(clip);
-  if (row) {
-    row.classList.add('clip--playing');
-    row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }
-  const [group, stem] = clip.id.split('/');
-  player.audio.src = voiceUrl(`/dataset/audio/${encodeURIComponent(group)}/${encodeURIComponent(stem)}`);
+  playerBadge();
+  player.audio.src = player.mode.audio(clip);
   player.playing = true;
-  box.querySelector('.player-controls button:nth-child(2)').textContent = '⏸';
+  play.textContent = '⏸';
   SMT.applyOutput(player.audio).then(() => player.audio.play()).catch(() => {});
 }
 
 function playerToggle(forcePlay) {
   if (!player.box) return;
   const play = forcePlay ?? !player.playing;
-  const button = player.box.querySelector('.player-controls button:nth-child(2)');
+  const button = player.box.querySelector('.player-play');
   if (play) {
     if (player.index >= player.queue.length || player.audio.ended) { playerGo(player.index + (player.audio.ended ? 1 : 0)); return; }
     player.playing = true;
@@ -3032,14 +3128,11 @@ function playerToggle(forcePlay) {
   }
 }
 
-function playerMark() {
+async function playerMark() {
   const entry = player.queue[player.index];
   if (!entry) return;
-  const { clip } = entry;
-  if (manageUi.deleted.has(clip.id)) manageUi.deleted.delete(clip.id); else manageUi.deleted.add(clip.id);
-  player.box.classList.toggle('player--marked', manageUi.deleted.has(clip.id));
-  playerRow(clip)?.sync?.();
-  updateManagerSave();
+  await player.mode.toggle(entry.clip);
+  playerBadge();
 }
 
 function playerEdit() {
@@ -3047,8 +3140,8 @@ function playerEdit() {
   if (!entry) return;
   playerToggle(false);
   const edit = player.box.querySelector('.player-edit');
-  edit.value = manageUi.edits.get(entry.clip.id) ?? entry.clip.text;
-  edit.dataset.id = entry.clip.id;
+  edit.value = player.mode.text(entry.clip);
+  edit.dataset.index = String(player.index);
   player.box.querySelector('.player-subtitle').classList.add('hidden');
   edit.classList.remove('hidden');
   edit.focus();
@@ -3057,14 +3150,11 @@ function playerEdit() {
 function playerSaveEdit() {
   const edit = player.box.querySelector('.player-edit');
   if (edit.classList.contains('hidden')) return;
-  const entry = player.queue.find(({ clip }) => clip.id === edit.dataset.id);
+  const entry = player.queue[Number(edit.dataset.index)];
   if (entry) {
-    const value = edit.value.trim();
-    if (value && value !== entry.clip.text) manageUi.edits.set(entry.clip.id, value);
-    else manageUi.edits.delete(entry.clip.id);
-    player.box.querySelector('.player-subtitle').textContent = manageUi.edits.get(entry.clip.id) ?? entry.clip.text;
-    playerRow(entry.clip)?.sync?.();
-    updateManagerSave();
+    player.mode.setText(entry.clip, edit.value.trim());
+    player.box.querySelector('.player-subtitle').textContent = player.mode.text(entry.clip);
+    playerBadge();
   }
   edit.classList.add('hidden');
   player.box.querySelector('.player-subtitle').classList.remove('hidden');
@@ -3081,7 +3171,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'Escape') { e.preventDefault(); stopPlayer(); }
 });
 
-$('#manage-play').addEventListener('click', () => startPlayer(manageUi.order || []));
+$('#manage-play').addEventListener('click', () => startPlayer(manageUi.order || [], MANAGER));
 
 function playDatasetClip(clip, button) {
   const audio = $('#clip-audio');
