@@ -62,10 +62,14 @@ Behind a reverse proxy, enable **WebSocket** support (the Test Lab and wake word
 
 Training settings (1000 samples, 10k steps, ...) are in `app/wakeword/config_template.yaml`.
 
-## Voice tab
+## Voice: Build Dataset → Train Voice Model → Voices
 
-1. **Voice**: create a voice with a name, language and whether it should sound female or male (this picks a similar pretrained voice to start from).
-2. **Dataset**: the training data, short clips of the voice with exactly what was said. Add clips in any of these ways and mix them freely:
+A voice is made in three tabs, one per stage; each links on to the next, and the dataset you pick in one is picked in the others.
+
+**Build Dataset tab**
+
+1. **Dataset**: create a dataset with a name, language and whether it should sound female or male (this picks a similar pretrained voice to start from). The trained voice gets the same name.
+2. **Add clips**: the training data, short clips of the voice with exactly what was said. Add clips in any of these ways and mix them freely:
    - **Read sentences**: read the prompts shown. Keys: `R` record/stop, `P` play back, `S` save & next, `K` skip.
    - **Speak freely**: talk naturally (a story, your day, a book read aloud; up to 30 minutes per take).
    - **Import file**: audio or video you already have (voice memos, podcasts, interviews, a whole series of episodes: MP4, MKV, AVI, MOV, WMV, MP3, WAV, FLAC… up to 8 GB each; for videos only the sound is used). Pick several files, a **whole folder including its subfolders**, or drag them onto the page; you get a list of the audio/video files found (other files are skipped) to tick before importing. Files upload one after another and are processed one at a time. Files with several audio tracks (languages, commentary) ask which one to use, with the voice's language preselected. For surround sound (5.1/7.1) only the center channel is used by default, which is where film dialogue sits, away from the music and effects. A prepared dataset zip can be imported here too.
@@ -77,7 +81,9 @@ Training settings (1000 samples, 10k steps, ...) are in `app/wakeword/config_tem
     - **Character clone** (needs an AI connection): add an episode, a season or a whole series; each file is split into voices and the AI reads the transcript like a script to say who speaks every line (dialogue, voice groups, the cast from [TVmaze](https://www.tvmaze.com/api) found via an IMDb ID, folder, file names or metadata, and web search where the provider supports it). Lines the AI is sure of whose voice agrees are **confirmed**. Pick a character and review their confirmed and possible clips across every file; saved clips turn green and stay listed, and more episodes can be added any time with the character kept.
 
    50 recordings is the minimum and 300+ sounds much better. Already have a prepared dataset? Upload a zip (`metadata.csv` with `file|text` lines plus audio, or audio files with matching `.txt` transcripts). **⬇ Export dataset (.zip)**, next to the clip count, downloads every saved clip the same way (LJSpeech layout: `metadata.csv` with `id|text` + `wavs/`, non-WAV recordings converted to 22,050 Hz WAV), for a backup, another trainer, or another voice.
-3. **Train**: pick a preset:
+3. **Clips in the dataset**: everything the dataset trains on, grouped by where it came from (each imported episode or recording, each Read sentences group). Listen, correct the words, remove clips, then save; or delete the whole dataset (a trained model stays).
+
+**Train Voice Model tab**: pick the dataset, then **Train** with a preset:
 
    | Preset | Time | |
    |---|---|---|
@@ -89,7 +95,7 @@ Training settings (1000 samples, 10k steps, ...) are in `app/wakeword/config_tem
    **Starting voice**: training fine-tunes a pretrained Piper voice, and one that already sounds like you gets there faster and cleaner. The Train card lists the pretrained voices for your language; press ▶ to hear each one (sample clips from [piper-samples](https://rhasspy.github.io/piper-samples/)), or pick **Auto-detect** (the default): when training starts it compares up to 24 of your recordings with every candidate using a speaker-recognition model ([SpeechBrain ECAPA](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb), runs locally) and starts from the closest one. **Find match** shows the ranking with similarity scores before you train. It needs at least 5 recordings; with fewer, it falls back to a voice of your language and chosen gender.
 
    **Advanced settings** has the same choice for other languages plus a custom checkpoint or training from scratch, and hours, max epochs, batch size (auto-picked from GPU memory), device and sample rate. **Train more** continues where the last run stopped.
-4. **Test & install**: type anything and click **Speak**. A **Speed** slider slows the voice down or speeds it up without retraining; downloads have that speed built into the model (so every app plays it at that speed) and in their name (`en_US-tony_speed85-medium`), and the Test Lab uses it too. During training, **Export latest version now** lets you hear progress. Then click **Download for Home Assistant**:
+**Voices tab**: the voices you've trained. Pick one, type anything and click **Speak**. Delete single versions or the whole model (the dataset stays). A **Speed** slider slows the voice down or speeds it up without retraining; downloads have that speed built into the model (so every app plays it at that speed) and in their name (`en_US-tony_speed85-medium`), and the Test Lab uses it too. During training, **Export latest version now** lets you hear progress. Then click **Download for Home Assistant**:
    1. In Home Assistant open **Settings → Add-ons → Piper → Open Web UI** and upload the `.onnx` and `.onnx.json` files (or copy them to `/share/piper`).
    2. Restart the Piper add-on if the voice doesn't show up.
    3. In **Settings → Voice assistants**, pick your voice.

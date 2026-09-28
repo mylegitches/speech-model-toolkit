@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from .. import errors
 from ..settings import store as settings_store
-from . import freeform, identify, matching, speakers
+from . import dataset, freeform, identify, matching, speakers
 from .speed import length_scale, speed_files, speed_stem
 from .training import (
     ACCELERATORS,
@@ -168,6 +168,86 @@ async def api_delete_voice(name: str) -> Dict[str, Any]:
     trainer.forget(voice)
     store.delete(voice)
     return {"ok": True}
+
+
+# ---- Dataset manager (Build Dataset) and models (Voices) ------------------------
+
+
+class ClipEditsRequest(BaseModel):
+    clips: List[Dict[str, Any]] = []   # [{id, text}]
+    delete: List[str] = []             # clip ids
+
+
+@app.get("/api/voices/{name}/dataset/clips")
+async def api_dataset_clips(name: str) -> Dict[str, Any]:
+    """Every clip in the dataset with its transcript."""
+    return {"clips": await asyncio.to_thread(dataset.list_clips, store.get(name))}
+
+
+@app.get("/api/voices/{name}/dataset/audio/{group}/{stem}")
+async def api_dataset_audio(name: str, group: str, stem: str) -> FileResponse:
+    return FileResponse(dataset.audio_path(store.get(name), f"{group}/{stem}"))
+
+
+@app.post("/api/voices/{name}/dataset/edit")
+async def api_dataset_edit(name: str, request: ClipEditsRequest) -> Dict[str, Any]:
+    """Corrected transcripts and deleted clips, saved together."""
+    voice = store.get(name)
+
+    def apply() -> Dict[str, int]:
+        for clip in request.clips:
+            dataset.set_text(voice, str(clip.get("id", "")), str(clip.get("text", "")))
+        return {"edited": len(request.clips), "deleted": dataset.delete_clips(voice, request.delete)}
+
+    result = await asyncio.to_thread(apply)
+    return {**result, "recorded": voice.num_recorded()}
+
+
+def _has_model(workspace: Workspace) -> bool:
+    return bool(workspace.exports()) or workspace.latest_checkpoint() is not None
+
+
+@app.delete("/api/voices/{name}/dataset")
+async def api_delete_dataset(name: str) -> Dict[str, Any]:
+    """The dataset goes; trained models stay. Without any model the whole voice goes."""
+    voice = store.get(name)
+    workspace = trainer.get(voice)
+    if workspace.active:
+        raise RuntimeError("This voice is training; stop it first")
+    if not _has_model(workspace):
+        trainer.forget(voice)
+        store.delete(voice)
+        return {"voiceDeleted": True}
+    await asyncio.to_thread(dataset.delete_dataset, voice)
+    return {"voiceDeleted": False, "recorded": voice.num_recorded()}
+
+
+@app.delete("/api/voices/{name}/exports/{export}")
+async def api_delete_export(name: str, export: str) -> Dict[str, Any]:
+    """One version of the trained voice."""
+    workspace = workspace_for(name)
+    if workspace.exporting:
+        raise RuntimeError("Wait for the export to finish")
+    await asyncio.to_thread(shutil.rmtree, export_dir_for(workspace, export))
+    return {"exports": workspace.exports()}
+
+
+@app.delete("/api/voices/{name}/model")
+async def api_delete_model(name: str) -> Dict[str, Any]:
+    """Every trained version and the training runs; the dataset stays.
+    Without a dataset either, the whole voice goes."""
+    voice = store.get(name)
+    workspace = trainer.get(voice)
+    if workspace.active or workspace.exporting:
+        raise RuntimeError("This voice is training or exporting; stop it first")
+    if voice.num_recorded() == 0 and not (voice.root / "freeform").is_dir():
+        trainer.forget(voice)
+        store.delete(voice)
+        return {"voiceDeleted": True}
+    for path in (workspace.exports_dir, workspace.work_dir):
+        await asyncio.to_thread(shutil.rmtree, path, True)
+    trainer.forget(voice)
+    return {"voiceDeleted": False}
 
 
 # ---- Recording ---------------------------------------------------------------

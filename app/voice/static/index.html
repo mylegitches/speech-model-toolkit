@@ -4,7 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Voice · Speech Model Toolkit</title>
-  <script>if (window.self !== window.top) document.documentElement.classList.add("embedded");</script>
+  <script>if (window.self !== window.top) document.documentElement.classList.add("embedded");
+    // One page, three tabs: Build Dataset (?view=dataset), Train Voice Model (train), Voices (voices)
+    document.documentElement.dataset.view =
+      ({ dataset: 1, train: 1, voices: 1 })[new URLSearchParams(location.search).get("view")]
+        ? new URLSearchParams(location.search).get("view") : "dataset";</script>
   <link rel="icon" href="../static/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="../static/theme.css" />
   <link rel="stylesheet" href="static/styles.css" />
@@ -12,21 +16,22 @@
 <body>
   <div class="container">
     <header>
-      <h1>Voice Trainer</h1>
-      <p class="subtitle">Build a dataset of the voice, click Train, and use it in Home Assistant.</p>
+      <h1><span class="only-dataset">Build Dataset</span><span class="only-train">Train Voice Model</span><span class="only-voices">Voices</span></h1>
+      <p class="subtitle"><span class="only-dataset">Record, import or clone clips of a voice, review them, and manage what's in each dataset.</span><span class="only-train">Pick a dataset, set how long and from which voice to start, and train.</span><span class="only-voices">Your trained voices: listen, set the speed, download for Home Assistant, or delete them.</span></p>
     </header>
 
     <div id="device-banner" class="banner banner--warning hidden"></div>
 
     <!-- 1. Voice -->
-    <section class="card">
-      <h2><span class="step">1</span> Voice</h2>
+    <section class="card" id="voice-card">
+      <h2><span class="step">1</span> <span class="only-dataset">Dataset</span><span class="only-train">Dataset to train on</span><span class="only-voices">Voice model</span></h2>
       <div class="row">
         <select id="voice-select" class="grow">
-          <option value="">— choose a voice —</option>
+          <option value="">— choose —</option>
         </select>
-        <button id="new-voice-btn" class="btn btn--secondary">+ New voice</button>
+        <button id="new-voice-btn" class="btn btn--secondary only-dataset">+ New dataset</button>
       </div>
+      <p id="no-models" class="hint hidden only-voices">No trained voices yet. <a href="../#train" target="_top">Train one in Train Voice Model →</a></p>
 
       <form id="new-voice-form" class="new-voice hidden">
         <div class="grid">
@@ -44,17 +49,18 @@
           </label>
         </div>
         <div class="row">
-          <button type="submit" class="btn btn--primary">Create voice</button>
+          <button type="submit" class="btn btn--primary">Create dataset</button>
           <button type="button" id="cancel-new-voice" class="btn btn--ghost">Cancel</button>
         </div>
       </form>
 
       <p id="voice-summary" class="hint"></p>
+      <a id="next-train" class="next-link hidden only-dataset" href="../#train" target="_top">Next: train a voice model on this dataset →</a>
     </section>
 
     <!-- 2. Dataset -->
     <section id="record-card" class="card hidden">
-      <h2><span class="step">2</span> Dataset</h2>
+      <h2><span class="step">2</span> Add clips</h2>
       <p class="hint">The training data: short clips of the voice, each with exactly what was said. Add clips in any of these ways and mix them freely.</p>
 
       <div class="readiness">
@@ -183,9 +189,27 @@
       </div>
     </section>
 
+    <!-- Clips in the dataset (Build Dataset) -->
+    <section id="manage-card" class="card hidden">
+      <div class="card-head">
+        <h2><span class="step">3</span> Clips in the dataset</h2>
+        <span id="manage-count" class="hint"></span>
+      </div>
+      <p class="hint">Everything this dataset trains on. Open a group, ▶ to listen, fix wrong words, 🗑 to remove a clip, then <strong>Save changes</strong>.</p>
+      <div class="row">
+        <input id="manage-search" type="search" class="grow" placeholder="Find words in the clips…" />
+      </div>
+      <div id="manage-list" class="manage-list"></div>
+      <div class="row manage-foot">
+        <button id="manage-save" class="btn btn--primary" disabled>Save changes</button>
+        <span class="grow"></span>
+        <button id="delete-dataset" class="btn btn--danger">Delete this dataset</button>
+      </div>
+    </section>
+
     <!-- 3. Train -->
     <section id="train-card" class="card hidden">
-      <h2><span class="step">3</span> Train</h2>
+      <h2><span class="step">2</span> Train</h2>
       <div id="train-pending" class="banner banner--warning hidden">
         <span id="train-pending-text"></span>
         <button type="button" id="train-pending-btn" class="btn btn--secondary">Go to review</button>
@@ -254,11 +278,12 @@
         </details>
       </div>
       <div id="train-error" class="banner banner--error hidden"></div>
+      <a id="next-voices" class="next-link hidden" href="../#voices" target="_top">Next: listen to it, set the speed and download it in Voices →</a>
     </section>
 
     <!-- 4. Test & install -->
     <section id="test-card" class="card hidden">
-      <h2><span class="step">4</span> Test &amp; install</h2>
+      <h2><span class="step">2</span> Listen &amp; download</h2>
       <p id="no-exports" class="hint">Your voice appears here after training. While training runs you can export the latest version to hear how it's going.</p>
 
       <div id="export-area" class="hidden">
@@ -266,6 +291,7 @@
           <label class="grow">Version
             <select id="export-select"></select>
           </label>
+          <button type="button" id="delete-export" class="btn btn--ghost" title="Delete this version of the voice">🗑 Delete this version</button>
         </div>
         <div class="row">
           <input id="speak-input" class="grow" maxlength="500" />
@@ -292,6 +318,11 @@
       </div>
 
       <button id="export-btn" class="btn btn--secondary hidden">Export latest version now</button>
+      <div class="row manage-foot">
+        <a id="next-lab" class="next-link hidden" href="../#lab" target="_top">Next: try it with your wake word in the Test Lab →</a>
+        <span class="grow"></span>
+        <button type="button" id="delete-model" class="btn btn--danger" title="Delete every version and the training runs; the dataset stays">Delete this voice model</button>
+      </div>
     </section>
 
     <footer class="hint">

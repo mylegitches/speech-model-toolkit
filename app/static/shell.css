@@ -85,6 +85,13 @@ main { flex: 1; min-height: 0; position: relative; }
 .notes h3 { font-size: 0.95rem; margin-bottom: 0.3rem; }
 .notes p { color: var(--muted); font-size: 0.9rem; }
 
+/* Narrower desktops: seven tabs still fit */
+@media (max-width: 1100px) and (min-width: 641px) {
+  .tab { padding: 0 0.55rem; font-size: 0.9rem; }
+  .tab-label[data-short] { font-size: 0; }
+  .tab-label[data-short]::after { content: attr(data-short); font-size: 0.9rem; }
+}
+
 /* ---- Phones: app-style bottom tab bar ------------------------------------- */
 @media (max-width: 640px) {
   :root { --topbar-h: 50px; }
@@ -114,6 +121,9 @@ main { flex: 1; min-height: 0; position: relative; }
   }
   .tab-icon { display: block; }
   .tab-label { white-space: nowrap; }
+  /* Seven tabs: the long names get a short one */
+  .tab-label[data-short] { font-size: 0; }
+  .tab-label[data-short]::after { content: attr(data-short); font-size: 0.68rem; }
   .tab.active { color: var(--accent-text); }
   .tab .dot { position: absolute; top: 9px; left: calc(50% + 9px); }
 

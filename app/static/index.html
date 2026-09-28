@@ -30,15 +30,23 @@
       </a>
       <a class="tab" href="#wakeword" data-tab="wakeword" role="tab">
         <svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
-        <span class="tab-label">Wake Word</span> <span class="dot" id="dot-wakeword"></span>
+        <span class="tab-label" data-short="Wake">Wake Word</span> <span class="dot" id="dot-wakeword"></span>
       </a>
-      <a class="tab" href="#voice" data-tab="voice" role="tab">
+      <a class="tab" href="#dataset" data-tab="dataset" role="tab">
+        <svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
+        <span class="tab-label" data-short="Dataset">Build Dataset</span>
+      </a>
+      <a class="tab" href="#train" data-tab="train" role="tab">
+        <svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3"/><path d="M12 18v3"/><path d="m4.2 4.2 2.1 2.1"/><path d="m17.7 17.7 2.1 2.1"/><path d="M3 12h3"/><path d="M18 12h3"/><path d="m4.2 19.8 2.1-2.1"/><path d="m17.7 6.3 2.1-2.1"/><circle cx="12" cy="12" r="3"/></svg>
+        <span class="tab-label" data-short="Train">Train Voice Model</span> <span class="dot" id="dot-voice"></span>
+      </a>
+      <a class="tab" href="#voices" data-tab="voices" role="tab">
         <svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>
-        <span class="tab-label">Voice</span> <span class="dot" id="dot-voice"></span>
+        <span class="tab-label" data-short="Voices">Voices</span>
       </a>
       <a class="tab" href="#lab" data-tab="lab" role="tab">
         <svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6"/><path d="M10 3v6.5L4.5 19a1.5 1.5 0 0 0 1.3 2.2h12.4a1.5 1.5 0 0 0 1.3-2.2L14 9.5V3"/><path d="M7.5 15h9"/></svg>
-        <span class="tab-label">Test Lab</span>
+        <span class="tab-label" data-short="Lab">Test Lab</span>
       </a>
       <a class="tab" href="#settings" data-tab="settings" role="tab">
         <svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
@@ -119,7 +127,7 @@
             </dl>
             <div class="tool-foot">
               <span class="hint">30 min – 8 h · NVIDIA GPU recommended</span>
-              <a class="btn btn--primary" href="#voice">Open voice trainer →</a>
+              <a class="btn btn--primary" href="#dataset">Build a dataset →</a>
             </div>
           </article>
         </div>
@@ -168,7 +176,9 @@
     <!-- Tools: iframes are created on first visit and kept alive, so training
          logs keep streaming while you look at the other tab. -->
     <section class="panel frame" id="panel-wakeword" data-src="wakeword/"></section>
-    <section class="panel frame" id="panel-voice" data-src="voice/"></section>
+    <section class="panel frame" id="panel-dataset" data-src="voice/?view=dataset"></section>
+    <section class="panel frame" id="panel-train" data-src="voice/?view=train"></section>
+    <section class="panel frame" id="panel-voices" data-src="voice/?view=voices"></section>
     <section class="panel frame" id="panel-lab" data-src="lab/"></section>
     <section class="panel frame" id="panel-settings" data-src="settings/"></section>
   </main>

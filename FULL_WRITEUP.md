@@ -60,9 +60,11 @@ The app is one page with five tabs: **Home, Wake Word, Voice, Test Lab, Settings
 
 ### 🗣️ Voice: clone a voice for Piper text-to-speech
 
-**Step 1: Voice.** Create a voice with a name, language (59 recording-prompt languages) and whether it should sound female or male.
+Three tabs, one per stage, each linking on to the next: **Build Dataset → Train Voice Model → Voices**.
 
-**Step 2: Dataset.** Build the training data, short clips with exact transcripts, in any mix of three ways:
+**Build Dataset: create a dataset.** A name, language (59 recording-prompt languages) and whether it should sound female or male.
+
+**Build Dataset: add clips.** The training data, short clips with exact transcripts, in any mix of four ways:
 
 - **Read sentences:** a teleprompter-style recorder with over 1,000 varied prompts per language (e.g. 1,150 for US English). Keyboard shortcuts (R record, P play, S save, K skip), a level meter with clipping warning, and a readiness bar (50 clips minimum, 300+ recommended, 1,000 ideal).
 - **Speak freely:** just talk (a story, your day, a book read aloud) for up to 30 minutes. The take is transcribed locally with Whisper using word-level timestamps and **automatically cut into sentence-sized clips** at sentence ends, pauses and speaker turns.
@@ -79,17 +81,20 @@ The app is one page with five tabs: **Home, Wake Word, Voice, Test Lab, Settings
   - *Reduce*: steady hiss and hum (high-pass + FFT denoiser)
   - *Remove*: RNNoise neural speech denoiser, which also removes music, traffic and crowds
 
-**Step 3: Train.**
+**Build Dataset: manage it.** Every clip in the dataset, grouped by the episode or recording it came from: listen, correct words, remove clips (saved together), search, or delete the whole dataset (trained models stay).
+
+**Train Voice Model.** Pick a dataset and train:
 
 - **Starting voice with ▶ samples:** training fine-tunes a pretrained Piper voice. The app lists every pretrained voice for the language (11 for US English), each with a play button for its official sample.
 - **Auto-detect (the default):** compares up to 24 of your clips with every candidate using a speaker-recognition neural network (ECAPA-TDNN) and starts from the closest-sounding one. **Find match** shows the ranking with similarity scores before you train.
 - **Presets:** Quick test (30 min), Good (3 h), Best (8 h), or Until I stop it. Advanced settings cover epochs, batch size (auto-picked from GPU memory), device, sample rate, other languages, custom checkpoints or training from scratch. **Train more** continues where the last run stopped.
 - Live progress: stages, a time bar and the full training log.
 
-**Step 4: Test & install.**
+**Voices.** Every trained voice and its versions:
 
 - Type anything and hear the voice speak it, even *during* training ("Export latest version now").
 - **Download for Home Assistant:** `.onnx` + `.onnx.json`, named the way Home Assistant's Piper add-on expects, with step-by-step install instructions on the page.
+- **Delete** single versions or the whole model; the dataset stays for another run.
 - **Speed control without retraining:** a slider (60–130%) previews the voice slower or faster; downloads have the speed built into the ONNX model (a multiply on Piper's `length_scale` input, so it works even in apps that ignore the `.onnx.json`) and in the file name (`en_US-tony_speed85-medium`), so several speeds can sit side by side in Home Assistant. The Test Lab uses the same per-voice speed.
 
 ### 🧪 Test Lab: your wake word + your voice = a working assistant

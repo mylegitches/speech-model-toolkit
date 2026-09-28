@@ -33,28 +33,79 @@ function voiceUrl(suffix = '') {
 // ---------------------------------------------------------------------------
 // 1. Voice
 
-async function loadVoices(selectName) {
-  const { voices } = await api('api/voices');
-  const select = $('#voice-select');
-  select.innerHTML = '<option value="">— choose a voice —</option>';
-  voices.forEach((v) => {
-    const option = new Option(`${v.name} · ${v.languageName} · ${v.recorded} recordings`, v.name);
-    select.add(option);
-  });
+// Which tab this page is (set in index.html from ?view=): dataset, train or voices
+const VIEW = document.documentElement.dataset.view || 'dataset';
+const hasModel = (v) => Boolean(v.training.exports.length);
 
+/** The choices for this tab: datasets, or (Voices) the ones with a trained model. */
+async function refreshVoiceList() {
+  const { voices } = await api('api/voices');
+  const list = VIEW === 'voices' ? voices.filter(hasModel) : voices;
+  const select = $('#voice-select');
+  const current = select.value;
+  select.innerHTML = '';
+  select.add(new Option(VIEW === 'voices' ? '— choose a voice model —' : '— choose a dataset —', ''));
+  list.forEach((v) => {
+    const latest = v.training.exports[0];
+    const label = {
+      dataset: `${v.name} · ${v.languageName} · ${v.recorded} clips`,
+      train: `${v.name} · ${v.recorded} clips${hasModel(v) ? ` · trained to epoch ${latest.epoch}` : ''}`,
+      voices: `${v.name} · ${v.languageName} · ${v.training.exports.length} version${v.training.exports.length === 1 ? '' : 's'}, latest epoch ${latest?.epoch}`,
+    }[VIEW];
+    select.add(new Option(label, v.name));
+  });
+  if (list.some((v) => v.name === current)) select.value = current;
+  show($('#no-models'), VIEW === 'voices' && !list.length);
+  return list;
+}
+
+async function loadVoices(selectName) {
+  const list = await refreshVoiceList();
+  const select = $('#voice-select');
   let name = selectName;
   if (!name) {
     try { name = localStorage.getItem('voice'); } catch (e) { name = null; }
   }
-  if (name && voices.some((v) => v.name === name)) {
+  if (name && list.some((v) => v.name === name)) {
     select.value = name;
-  } else if (voices.length > 0) {
-    select.value = voices[0].name;
+  } else if (list.length > 0) {
+    select.value = list[0].name;
   }
 
-  show($('#new-voice-form'), voices.length === 0);
+  show($('#new-voice-form'), VIEW === 'dataset' && list.length === 0);
   await selectVoice(select.value);
 }
+
+/** Remember the choice for the other tabs (only choices you make, so tabs don't pull each other around). */
+function rememberVoice(name) {
+  try { localStorage.setItem('voice', name || ''); } catch (e) { /* ignore */ }
+}
+
+// Another tab picked a dataset or voice: follow it, if it's one this tab lists
+window.addEventListener('storage', async (e) => {
+  if (e.key !== 'voice' || !e.newValue || e.newValue === voice?.name) return;
+  const list = await refreshVoiceList();
+  if (list.some((v) => v.name === e.newValue)) {
+    $('#voice-select').value = e.newValue;
+    selectVoice(e.newValue);
+  }
+});
+
+// Back on this tab: new datasets or models may have appeared (the current work stays as it is)
+window.addEventListener('message', async (e) => {
+  if (e.origin !== location.origin || e.data?.type !== 'smt:shown') return;
+  const list = await refreshVoiceList();
+  if (!voice || !list.some((v) => v.name === voice.name)) {
+    if (list.length) {
+      $('#voice-select').value = list[0].name;
+      selectVoice(list[0].name);
+    } else if (voice) {
+      selectVoice('');
+    }
+  } else if (VIEW !== 'dataset') {
+    selectVoice(voice.name);  // Train / Voices: fresh training state and versions
+  }
+});
 
 async function selectVoice(name) {
   if (events) {
@@ -62,46 +113,67 @@ async function selectVoice(name) {
     events = null;
   }
   voice = name ? await api(`api/voices/${encodeURIComponent(name)}`) : null;
-  try { localStorage.setItem('voice', name || ''); } catch (e) { /* ignore */ }
 
-  [$('#record-card'), $('#train-card'), $('#test-card')].forEach((card) => show(card, !!voice));
+  [$('#record-card'), $('#manage-card'), $('#train-card'), $('#test-card')].forEach((card) => show(card, !!voice));
   if (!voice) {
     $('#voice-summary').textContent = '';
+    show($('#next-train'), false);
     return;
   }
 
   $('#voice-summary').textContent =
     `${voice.languageName} · ${voice.gender} · phonemes: ${voice.espeak_voice} · model: ${voice.modelName}.onnx`;
-  loadSpeed();
-  charUi.name = null;
-  show($('#character-panel'), false);
-  $('#speak-input').value = TEST_SENTENCES[voice.language.split('-')[0]] || '';
-
-  skip = 0;
-  $('#record-btn').innerHTML = '● Record <kbd>R</kbd>';
-  $('#record-status').textContent = mediaStream
-    ? 'Read each sentence naturally in a quiet room. Press R to record, R again to stop.'
-    : 'First pick your microphone and click “Enable microphone”. Use the same one every session.';
   updateRecorded(voice.recorded);
-  await loadPrompt();
-  if (micAvailable()) {
-    await listMicrophones();
-    checkMicMatch();
-  }
-  matchState = null;
-  fillTrainForm(voice.defaults);
-  loadMatch();
-  $('#free-takes').innerHTML = '';
-  Object.keys(renderedTakes).forEach((id) => delete renderedTakes[id]);
-  loadTakes();
   logCount = 0;
   $('#log-panel').textContent = '';
+
+  if (VIEW === 'dataset') {
+    charUi.name = null;
+    show($('#character-panel'), false);
+    skip = 0;
+    $('#record-btn').innerHTML = '● Record <kbd>R</kbd>';
+    $('#record-status').textContent = mediaStream
+      ? 'Read each sentence naturally in a quiet room. Press R to record, R again to stop.'
+      : 'First pick your microphone and click “Enable microphone”. Use the same one every session.';
+    await loadPrompt();
+    if (micAvailable()) {
+      await listMicrophones();
+      checkMicMatch();
+    }
+    loadManager();
+  }
+  if (VIEW === 'train') {
+    matchState = null;
+    fillTrainForm(voice.defaults);
+    loadMatch();
+  }
+  if (VIEW === 'voices') {
+    loadSpeed();
+    $('#speak-input').value = TEST_SENTENCES[voice.language.split('-')[0]] || '';
+  }
+  // Files waiting for review (Build Dataset lists them; Train warns about them)
+  $('#free-takes').innerHTML = '';
+  Object.keys(renderedTakes).forEach((id) => delete renderedTakes[id]);
+  if (VIEW !== 'voices') loadTakes();
   renderStatus(voice.training);
-  refreshInfo();  // is another voice training right now?
-  connectEvents();
+  if (VIEW !== 'dataset') {
+    refreshInfo();  // is another voice training right now?
+    connectEvents();
+  }
 }
 
-$('#voice-select').addEventListener('change', (e) => selectVoice(e.target.value));
+$('#voice-select').addEventListener('change', (e) => {
+  rememberVoice(e.target.value);
+  selectVoice(e.target.value);
+});
+
+// "Next" links: the next tab opens on this dataset / voice
+['#next-train', '#next-voices', '#next-lab'].forEach((id) => $(id).addEventListener('click', () => {
+  rememberVoice(voice?.name);
+  if (id === '#next-lab') {
+    try { localStorage.setItem('smt.lab.voice', `voice:${voice.name}`); } catch (e) { /* ignore */ }
+  }
+}));
 $('#new-voice-btn').addEventListener('click', () => {
   show($('#new-voice-form'), true);
   $('#new-name').focus();
@@ -117,6 +189,7 @@ $('#new-voice-form').addEventListener('submit', async (e) => {
       gender: $('#new-gender').value,
     });
     $('#new-name').value = '';
+    rememberVoice(created.name);
     await loadVoices(created.name);
   } catch (err) {
     SMT.showError(err.message);
@@ -137,6 +210,12 @@ let analyser = null;
 function updateRecorded(count) {
   voice.recorded = count;
   $('#recorded-count').textContent = count;
+  show($('#next-train'), count >= 50);  // enough to train: on to the next tab
+  // Clips added or removed elsewhere on the page: the list of clips follows (unless you're editing it)
+  if (VIEW === 'dataset' && count !== manageUi.clips.length && !manageUi.edits.size && !manageUi.deleted.size) {
+    clearTimeout(manageUi.timer);
+    manageUi.timer = setTimeout(loadManager, 800);
+  }
   const exportLink = $('#export-dataset');
   exportLink.href = voiceUrl('/dataset.zip');
   exportLink.classList.toggle('hidden', !count);
@@ -1752,6 +1831,12 @@ function updatePending(takes) {
 }
 
 function goToReview() {
+  if (VIEW !== 'dataset') {
+    // The review is in the Build Dataset tab
+    rememberVoice(voice?.name);
+    window.top.location.hash = 'dataset';
+    return;
+  }
   if (recordMode === 'prompts') setMode('free');
   const first = document.querySelector('#free-takes .take');
   (first || $('#record-card')).scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2463,6 +2548,9 @@ function renderExports(s) {
   const exports = s.exports || [];
   show($('#export-area'), exports.length > 0);
   show($('#no-exports'), exports.length === 0);
+  show($('#next-voices'), exports.length > 0 || Boolean(s.hasCheckpoint));
+  show($('#next-lab'), exports.length > 0);
+  show($('#delete-model'), exports.length > 0 || Boolean(s.hasCheckpoint));
   show($('#export-btn'), s.hasCheckpoint && (s.state === 'running' || exports.length === 0 || s.exporting));
   $('#export-btn').disabled = s.exporting;
   $('#export-btn').textContent = s.exporting ? 'Exporting…' : 'Export latest version now';
@@ -2623,6 +2711,199 @@ async function refreshInfo() {
   }
   if (status && voice) renderStatus(status);
 }
+
+// ---------------------------------------------------------------------------
+// Clips in the dataset (Build Dataset): listen, correct, delete; delete the dataset
+
+const manageUi = { clips: [], edits: new Map(), deleted: new Set(), open: new Set(), search: '' };
+
+function groupLabel(key, clips) {
+  if (key.startsWith('freeform:')) {
+    const take = lastTakes.find((t) => t.id === key.slice(9));
+    return take ? (take.name || `Recording ${take.id}`) : `Earlier file (${key.slice(9)})`;
+  }
+  if (key === 'upload') return 'Imported dataset (.zip)';
+  if (key === 'freeform') return 'Speak freely, imports and Character clone';
+  return `Read sentences · ${key}`;
+}
+
+async function loadManager() {
+  if (VIEW !== 'dataset' || !voice) return;
+  Object.assign(manageUi, { clips: [], edits: new Map(), deleted: new Set() });
+  try {
+    manageUi.clips = (await api(voiceUrl('/dataset/clips'))).clips;
+  } catch (err) {
+    SMT.showError(err.message);
+  }
+  renderManager();
+}
+
+function renderManager() {
+  const box = $('#manage-list');
+  box.innerHTML = '';
+  const needle = manageUi.search.trim().toLowerCase();
+  const clips = manageUi.clips.filter((c) => !needle || c.text.toLowerCase().includes(needle)
+    || (manageUi.edits.get(c.id) || '').toLowerCase().includes(needle));
+  const total = manageUi.clips.reduce((sum, c) => sum + (c.seconds || 0), 0);
+  $('#manage-count').textContent = `${manageUi.clips.length} clips${total ? ` · ${clock(total)}` : ''}`;
+  if (!clips.length) {
+    box.append(el('p', { className: 'hint', textContent: manageUi.clips.length ? 'No clips with those words.' : 'No clips yet: add some above.' }));
+  }
+  // Freeform clips grouped by the file they came from (an episode, a recording)
+  const groups = new Map();
+  clips.forEach((c) => {
+    const stem = c.id.split('/')[1];
+    const take = c.group === 'freeform' && stem.match(/^(.+)_\d{4}$/);
+    const key = take ? `freeform:${take[1]}` : c.group;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c);
+  });
+  [...groups.entries()]
+    .sort((a, b) => groupLabel(a[0]).localeCompare(groupLabel(b[0]), undefined, { numeric: true }))
+    .forEach(([key, list]) => {
+      const details = el('details', { className: 'manage-group' });
+      details.open = manageUi.open.has(key) || Boolean(needle);
+      const summary = el('summary');
+      const describe = () => {
+        const changed = list.filter((c) => manageUi.edits.has(c.id)).length;
+        const gone = list.filter((c) => manageUi.deleted.has(c.id)).length;
+        summary.textContent = [groupLabel(key), `${list.length} clip${list.length === 1 ? '' : 's'}`,
+          changed && `${changed} edited`, gone && `${gone} to delete`].filter(Boolean).join(' · ');
+      };
+      describe();
+      details.append(summary);
+      const fill = () => {
+        if (details.dataset.filled) return;
+        details.dataset.filled = '1';
+        const rows = el('div', { className: 'clips' });
+        list.forEach((clip) => rows.append(managerRow(clip, () => { describe(); updateManagerSave(); })));
+        details.append(rows);
+      };
+      details.addEventListener('toggle', () => {
+        if (details.open) { manageUi.open.add(key); fill(); } else manageUi.open.delete(key);
+      });
+      if (details.open) fill();
+      box.append(details);
+    });
+  updateManagerSave();
+}
+
+function managerRow(clip, changed) {
+  const row = el('div', { className: 'clip' });
+  const play = el('button', { type: 'button', className: 'btn btn--secondary', textContent: '▶' });
+  play.addEventListener('click', () => playDatasetClip(clip, play));
+  const text = el('input', { type: 'text', value: manageUi.edits.get(clip.id) ?? clip.text });
+  text.addEventListener('input', () => {
+    if (text.value.trim() && text.value.trim() !== clip.text) manageUi.edits.set(clip.id, text.value.trim());
+    else manageUi.edits.delete(clip.id);
+    row.classList.toggle('clip--changed', manageUi.edits.has(clip.id));
+    changed();
+  });
+  const remove = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '🗑', title: 'Delete this clip (with Save changes)' });
+  const mark = () => {
+    const gone = manageUi.deleted.has(clip.id);
+    row.classList.toggle('clip--deleted', gone);
+    remove.textContent = gone ? '↩' : '🗑';
+    remove.title = gone ? 'Keep this clip' : 'Delete this clip (with Save changes)';
+    text.disabled = gone;
+  };
+  remove.addEventListener('click', () => {
+    if (manageUi.deleted.has(clip.id)) manageUi.deleted.delete(clip.id); else manageUi.deleted.add(clip.id);
+    mark();
+    changed();
+  });
+  row.classList.toggle('clip--changed', manageUi.edits.has(clip.id));
+  mark();
+  row.append(play, text, el('span', { className: 'dur', textContent: clip.seconds ? `${clip.seconds.toFixed(1)}s` : '' }), remove);
+  return row;
+}
+
+function playDatasetClip(clip, button) {
+  const audio = $('#clip-audio');
+  const label = '▶';
+  if (clipButton) clipButton.textContent = clipButton.dataset.label || label;
+  if (clipButton === button && !audio.paused) { audio.pause(); clipButton = null; return; }
+  clipButton = button;
+  button.dataset.label = label;
+  button.textContent = '■';
+  audio.onended = () => { button.textContent = label; clipButton = null; };
+  const [group, stem] = clip.id.split('/');
+  audio.src = voiceUrl(`/dataset/audio/${encodeURIComponent(group)}/${encodeURIComponent(stem)}`);
+  SMT.applyOutput(audio).then(() => audio.play()).catch(() => { button.textContent = label; });
+}
+
+function updateManagerSave() {
+  const edits = [...manageUi.edits.keys()].filter((id) => !manageUi.deleted.has(id)).length;
+  const gone = manageUi.deleted.size;
+  const button = $('#manage-save');
+  button.disabled = !edits && !gone;
+  button.textContent = edits || gone
+    ? `Save changes (${[edits && `${edits} edited`, gone && `${gone} deleted`].filter(Boolean).join(', ')})`
+    : 'Save changes';
+}
+
+$('#manage-search').addEventListener('input', (e) => { manageUi.search = e.target.value; renderManager(); });
+
+$('#manage-save').addEventListener('click', async () => {
+  const button = $('#manage-save');
+  button.disabled = true;
+  button.textContent = 'Saving…';
+  try {
+    const result = await postJson(voiceUrl('/dataset/edit'), {
+      clips: [...manageUi.edits.entries()].filter(([id]) => !manageUi.deleted.has(id)).map(([id, text]) => ({ id, text })),
+      delete: [...manageUi.deleted],
+    });
+    updateRecorded(result.recorded);
+    $('#manage-count').textContent = `Saved: ${result.edited} edited, ${result.deleted} deleted`;
+  } catch (err) {
+    SMT.showError(err.message);
+  }
+  loadManager();
+  loadTakes();  // Character clone review and Files table follow
+});
+
+$('#delete-dataset').addEventListener('click', async () => {
+  const trained = voice.training.exports.length > 0 || voice.training.hasCheckpoint;
+  if (!confirm(trained
+    ? `Delete the dataset "${voice.name}"? All ${voice.recorded} clips and the imported files waiting for review go. Its trained voice model stays (in Voices).`
+    : `Delete the dataset "${voice.name}"? All ${voice.recorded} clips and the imported files go. It has no trained model, so the whole voice goes.`)) return;
+  try {
+    const result = await api(voiceUrl('/dataset'), { method: 'DELETE' });
+    if (result.voiceDeleted) {
+      rememberVoice('');
+      await loadVoices();
+    } else {
+      await selectVoice(voice.name);
+    }
+  } catch (err) {
+    SMT.showError(err.message);
+  }
+});
+
+// Voices: delete one version, or the whole model
+$('#delete-export').addEventListener('click', async () => {
+  const dir = $('#export-select').value;
+  if (!dir || !confirm(`Delete version ${dir.replace('epoch_', 'epoch ')} of "${voice.name}"?`)) return;
+  try {
+    await api(voiceUrl(`/exports/${dir}`), { method: 'DELETE' });
+  } catch (err) {
+    SMT.showError(err.message);
+  }
+  await refreshVoiceList();
+  if ($('#voice-select').value) await selectVoice(voice.name); else await loadVoices();
+});
+
+$('#delete-model').addEventListener('click', async () => {
+  if (!confirm(`Delete the voice model "${voice.name}": every version and its training runs? The dataset stays (Build Dataset), so you can train it again.`)) return;
+  try {
+    const result = await api(voiceUrl('/model'), { method: 'DELETE' });
+    if (result.voiceDeleted) rememberVoice('');
+  } catch (err) {
+    SMT.showError(err.message);
+    return;
+  }
+  await loadVoices();
+});
 
 // ---------------------------------------------------------------------------
 

@@ -49,18 +49,20 @@ The tabs keep working in the background. You can start a voice training, switch 
 
 ---
 
-## 3. Create a voice
+## 3. Create a dataset
 
-1. Open the **Voice** tab.
-2. **1. Voice:** click **+ New voice**, give it a name (e.g. `dad`), choose the language and whether it should sound female or male, then click **Create voice**.
+Making a voice takes three tabs, one per stage: **Build Dataset** → **Train Voice Model** → **Voices**. Each links on to the next one, and the dataset you pick in one is picked in the others too.
 
-Each voice has its own dataset, training and exported versions. Switch between voices with the dropdown.
+1. Open the **Build Dataset** tab.
+2. **1. Dataset:** click **+ New dataset**, give it a name (e.g. `dad`; the trained voice gets the same name), choose the language and whether it should sound female or male, then click **Create dataset**.
+
+Switch between datasets with the dropdown.
 
 ---
 
 ## 4. Build the dataset
 
-**2. Dataset** is the training data: short clips of the voice, each with exactly what was said. More clips mean a better voice:
+**2. Add clips** builds the training data: short clips of the voice, each with exactly what was said. More clips mean a better voice:
 
 | Clips | Result |
 |---|---|
@@ -68,7 +70,7 @@ Each voice has its own dataset, training and exported versions. Switch between v
 | 300+ | Sounds much better. |
 | 1,000 | Excellent. |
 
-The readiness bar shows where you are. Use any of the three tabs and mix them freely.
+The readiness bar shows where you are. Use any of the four ways (Read sentences, Speak freely, Import file, Character clone) and mix them freely. Once there are 50 clips, **Next: train a voice model on this dataset →** takes you to the Train Voice Model tab.
 
 ### Read sentences
 
@@ -136,7 +138,7 @@ Once the person you want is marked, review the clips of each file, then use **�
 
 ### Character clone
 
-Clone one character from a TV show or film (Voice → Dataset → **Character clone**). It needs an AI connection (Settings → AI connections); **Import file** is the simpler way without AI: it splits the speakers and you pick one per file.
+Clone one character from a TV show or film (Build Dataset → **Character clone**). It needs an AI connection (Settings → AI connections); **Import file** is the simpler way without AI: it splits the speakers and you pick one per file.
 
 1. **Add an episode, a season folder or a whole series**: **🎬 Add episodes**, **📁 Add a season or series folder**, or drag them onto the tab, then **Add**. Background noise is removed by default (music, effects).
 2. **Each file is transcribed and split into voices**, then **the AI reads the transcript like a script** and says who speaks every line. It uses who is addressed and who replies, the voice groups, the show's cast (from TVmaze: name the show's folder, e.g. `The Sopranos/Season 1/…`, name the files `The.Sopranos.S01E01…`, keep the IMDb ID `tt…` in the name, or rely on file metadata) and, with web search on a provider that supports it (OpenRouter, Perplexity, Gemini, Anthropic, OpenAI search models, Ollama Cloud), looking lines up online. A line is **confirmed** when the AI is sure *and* its voice agrees with the rest of that character's lines in the file. The **Files** table shows where each file is (Queued, Preparing: *Transcribing 40%* / *Finding speakers*, Waiting for the AI, AI reading · part 2 of 5, Read by the AI) and, for the character you picked, their clips (✓ confirmed / ? possible) and what your review did: **Added** to the dataset, **Edited** (saved with corrected words), **Left out** (not saved in an episode you reviewed) and **To review**, with totals. ✕ discards a file (clips already in the dataset stay).
@@ -157,11 +159,15 @@ Spoken and imported takes wait for your review; nothing is added until you save.
 
 Then click **✓ Save N clips to the dataset** (at the top or bottom of the list) to add them, or **Discard** to throw the take away. **Clips only count once saved**: until then the Dataset counter shows them as *waiting for review*, and the Train step reminds you. Unfinished reviews are kept, so you can come back later.
 
+### Clips in the dataset
+
+**3. Clips in the dataset** lists everything the dataset trains on, grouped by where it came from (each imported episode or recording, each Read sentences group, an imported zip). Open a group, **▶** to listen, fix wrong words, **🗑** to remove a clip (↩ to keep it after all), then **Save changes**; corrections and deletions are saved together, and the Character clone review follows. **Find words in the clips…** searches them. **Delete this dataset** removes all its clips and the imported files waiting for review; a trained voice model stays in Voices (without one, the whole voice goes). **⬇ Export dataset (.zip)** next to the clip count downloads it first.
+
 ---
 
 ## 5. Train the voice
 
-**3. Train** fine-tunes a pretrained voice on your dataset.
+The **Train Voice Model** tab: pick the dataset in **1. Dataset to train on**, then **2. Train** fine-tunes a pretrained voice on it.
 
 1. **Starting voice:** leave **Auto-detect (recommended)** selected. When training starts it compares your clips with every pretrained voice for your language and starts from the one that sounds most like you. With Auto-detect selected the other voices are folded away; **Choose a voice myself** shows them (▶ to hear each one), and picking Auto-detect again folds them back.
    - Click **Find match** to see the ranking first (each voice gets a similarity %).
@@ -177,6 +183,7 @@ Then click **✓ Save N clips to the dataset** (at the top or bottom of the list
 
 3. Click **Train**. The progress bar, stage and log show what's happening. You can leave the page.
 4. **Train more** continues where the last run stopped: add more clips and train again to improve the voice.
+5. **Next: listen to it, set the speed and download it in Voices →** appears once there's a version to hear.
 
 **Advanced settings:** starting voices from other languages, your own checkpoint, training from scratch (very slow), hours, epochs, batch size (lower it if the GPU runs out of memory), device and sample rate.
 
@@ -186,7 +193,7 @@ A GPU makes a huge difference: hours instead of days. If voice training runs on 
 
 ## 6. Listen and install in Home Assistant
 
-**4. Test & install**
+The **Voices** tab lists the voices you've trained. Pick one in **1. Voice model**, then in **2. Listen & download**:
 
 1. Pick a **Version** (each export is a snapshot of the training), type any text and click **🔊 Speak**.
 2. While training runs, **Export latest version now** lets you hear how it's going.
@@ -195,6 +202,8 @@ A GPU makes a huge difference: hours instead of days. If voice training runs on 
 4. In Home Assistant, open **Settings → Add-ons → Piper → Open Web UI** and upload the `.onnx` and `.onnx.json` files from the zip, or copy them to `/share/piper`.
 5. Restart the Piper add-on if the voice doesn't appear.
 6. Go to **Settings → Voice assistants**, edit your assistant and choose the new voice.
+
+**🗑 Delete this version** removes the version selected; **Delete this voice model** removes every version and the training runs (the dataset stays in Build Dataset, so you can train it again). **Next: try it with your wake word in the Test Lab →** opens the Test Lab with this voice.
 
 ---
 

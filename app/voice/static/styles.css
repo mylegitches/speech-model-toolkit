@@ -228,3 +228,24 @@
 @media (max-width: 640px) {
   .mode-switch .mode-btn { white-space: normal; font-size: 0.85rem; padding: 0.45rem 0.3rem; line-height: 1.25; }
 }
+
+/* ---- One page, three tabs (html[data-view]) ------------------------------------ */
+html[data-view="dataset"] .only-train, html[data-view="dataset"] .only-voices,
+html[data-view="train"] .only-dataset, html[data-view="train"] .only-voices,
+html[data-view="voices"] .only-dataset, html[data-view="voices"] .only-train { display: none !important; }
+html[data-view="dataset"] #train-card, html[data-view="dataset"] #test-card, html[data-view="dataset"] #device-banner,
+html[data-view="train"] #record-card, html[data-view="train"] #manage-card, html[data-view="train"] #test-card,
+html[data-view="voices"] #record-card, html[data-view="voices"] #manage-card, html[data-view="voices"] #train-card,
+html[data-view="voices"] #device-banner { display: none !important; }
+.next-link { display: inline-block; margin-top: 0.6rem; font-weight: 600; color: var(--accent-text); text-decoration: none; }
+.next-link:hover { text-decoration: underline; }
+
+/* Clips in the dataset */
+.manage-list { display: flex; flex-direction: column; gap: 0.2rem; }
+.manage-group { border-top: 1px solid var(--border); padding: 0.35rem 0; }
+.manage-group > summary { cursor: pointer; font-size: 0.9rem; }
+.manage-group .clips { max-height: none; overflow: visible; margin-top: 0.4rem; }
+.clip.clip--deleted input[type=text] { text-decoration: line-through; opacity: 0.5; }
+.clip.clip--deleted { background: rgba(239, 68, 68, 0.1); border-radius: 6px; }
+.clip.clip--changed input[type=text] { border-color: #f59e0b; }
+.manage-foot { margin-top: 0.6rem; align-items: center; }
