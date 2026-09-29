@@ -298,3 +298,9 @@ body.player-open .container { padding-bottom: 360px; }  /* room to scroll past t
   .player-screen { min-height: 130px; }
 }
 .player:focus { outline: none; }
+
+/* Stage bubbles that lead somewhere */
+.pill--link { border: 0; cursor: pointer; font: inherit; font-size: 0.75rem; }
+.pill--link:hover, .pill--link:focus-visible { outline: 1px solid currentColor; outline-offset: 1px; }
+.flash { animation: flash 1.6s ease-out; }
+@keyframes flash { 0%, 30% { box-shadow: 0 0 0 2px var(--accent-text); } 100% { box-shadow: 0 0 0 2px transparent; } }

@@ -1394,6 +1394,51 @@ function cloneFileStats(take, name) {
   };
 }
 
+/** A stage bubble; where there's somewhere to go, it's a link: the episode in the review
+ *  (read by the AI), or the file's entry below the table (failed, needs a track). */
+function stagePill(take, stage, style) {
+  const reviewable = take.state === 'done' && take.attributed;
+  const needsYou = ['error', 'choose_track'].includes(take.state);
+  if (!reviewable && !needsYou) return el('span', { className: `pill ${style}`, textContent: stage });
+  const pill = el('button', {
+    type: 'button', className: `pill pill--link ${style}`, textContent: stage,
+    title: reviewable ? 'Go to this episode in the review' : 'Go to this file below',
+  });
+  pill.addEventListener('click', () => (reviewable ? goToEpisode(take.id) : goToTake(take.id)));
+  return pill;
+}
+
+/** Open an episode in the character review and bring it into view. */
+function goToEpisode(takeId) {
+  if (!charUi.name || !charUi.data) {
+    $('#clone-status').textContent = 'Pick a character first: the review shows one character at a time.';
+    cloneUi.showChars = true;
+    renderClone();
+    $('#clone-characters').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  const details = document.querySelector(`#character-panel details.char-file[data-id="c:${CSS.escape(takeId)}"]`)
+    || document.querySelector(`#character-panel details.char-file[data-id="p:${CSS.escape(takeId)}"]`);
+  if (!details) {
+    $('#clone-status').textContent = `${charUi.name} has no clips in that file.`;
+    return;
+  }
+  details.open = true;  // fills its clips (the toggle event)
+  flashAndScroll(details);
+}
+
+function goToTake(takeId) {
+  const node = document.querySelector(`#free-takes .take[data-id="${CSS.escape(takeId)}"]`);
+  if (node) flashAndScroll(node);
+}
+
+function flashAndScroll(node) {
+  node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  node.classList.remove('flash');
+  void node.offsetWidth;  // restart the animation
+  node.classList.add('flash');
+}
+
 /** Every Character clone file: its stage, and what the review did with it. */
 function cloneFilesTable(takes) {
   const name = charUi.name;
@@ -1430,7 +1475,7 @@ function cloneFilesTable(takes) {
     const num = (v) => el('td', { className: 'num', textContent: v == null ? '' : String(v) });
     const cells = [
       el('td', { className: 'file', textContent: take.name || take.id, title: take.name || take.id }),
-      el('td', { className: 'file-stage' }, el('span', { className: `pill ${style}`, textContent: stage })),
+      el('td', { className: 'file-stage' }, stagePill(take, stage, style)),
       num(lines),
     ];
     if (name) {
