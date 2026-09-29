@@ -3252,6 +3252,19 @@ function buildPlayer() {
   const close = button('✕', 'Close (Esc)', () => stopPlayer(), 'player-close');
   const keys = el('div', { className: 'player-keys hint' });
   box.append(close, screen, bar, controls, keys, audio);
+  // Touch: tap the picture to pause/play, swipe left for the next clip, right for the previous one
+  let touch = null;
+  screen.addEventListener('touchstart', (e) => {
+    touch = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+  }, { passive: true });
+  screen.addEventListener('touchend', (e) => {
+    if (!touch || e.target.closest('.player-edit') || !screen.querySelector('.player-edit.hidden')) return;
+    const dx = e.changedTouches[0].clientX - touch.x;
+    const dy = e.changedTouches[0].clientY - touch.y;
+    touch = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) playerGo(player.index + (dx < 0 ? 1 : -1));
+    else if (Math.abs(dx) < 10 && Math.abs(dy) < 10) { e.preventDefault(); playerToggle(); }
+  });
   const filter = controls.querySelector('.player-filter');
   filter.addEventListener('change', () => {
     try { localStorage.setItem(`voice.playFilter.${player.mode.name}`, filter.value); } catch (e) { /* ignore */ }

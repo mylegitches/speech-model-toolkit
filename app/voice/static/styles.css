@@ -300,10 +300,29 @@ body.player-open .container { padding-bottom: 360px; }  /* room to scroll past t
 .manage-group > summary::-webkit-details-marker { display: none; }
 .manage-group > summary::before { content: '▸'; color: var(--muted); }
 .manage-group[open] > summary::before { content: '▾'; }
-@media (max-width: 640px) {
-  .player-subtitle { font-size: 1.1rem; }
-  .player-screen { min-height: 130px; }
+/* Phones: docked edge to edge, big thumb-sized buttons on top, settings underneath */
+@media (max-width: 640px), (pointer: coarse) and (max-width: 900px) {
+  .player {
+    left: 0; right: 0; bottom: 0; transform: none; width: auto; border-radius: 14px 14px 0 0;
+    border-bottom: 0; padding: 0.6rem 0.6rem calc(0.6rem + env(safe-area-inset-bottom)); gap: 0.55rem;
+  }
+  .player-screen { min-height: 120px; padding: 2.2rem 0.9rem 0.9rem; }
+  .player-subtitle { font-size: 1.2rem; max-width: 100%; }
+  .player-from { padding-right: 7.5rem; }
+  .player-bar { height: 6px; }
+  .player-controls { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+  .player-buttons { order: -1; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; margin-left: 0; }
+  .player-controls .player-buttons .btn { min-height: 54px; font-size: 1.45rem; padding: 0.4rem; border-radius: 12px; }
+  .player-controls .player-buttons .player-wide { font-size: 1.05rem; font-weight: 600; }
+  .player-info { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem 0.8rem; }
+  .player-pos { width: 100%; text-align: center; }
+  .player-delay { font-size: 0.9rem; }
+  .player-delay select, .player-edit { font-size: 16px; }  /* 16px+: iOS doesn't zoom in on focus */
+  .player-delay select { min-height: 40px; }
+  .player-close { top: -20px; right: 12px; width: 40px; height: 40px; font-size: 1.1rem; }
+  body.player-open .container { padding-bottom: 440px; }
 }
+@media (pointer: coarse) { .player-keys { display: none; } }  /* no keyboard: tap and swipe instead */
 .player:focus { outline: none; }
 
 /* Stage bubbles that lead somewhere */
