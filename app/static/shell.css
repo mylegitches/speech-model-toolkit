@@ -144,3 +144,9 @@ main { flex: 1; min-height: 0; position: relative; }
 .install img { flex: none; border-radius: 10px; }
 .install p { flex: 1; color: var(--muted); font-size: 0.88rem; }
 .install strong { color: var(--text); display: block; }
+
+/* A tool's full-screen player on a phone (portrait or landscape): no bars around it */
+@media (max-width: 640px), (pointer: coarse) and (max-height: 540px) {
+  body.immersive .topbar, body.immersive .tabs { display: none; }
+  body.immersive main { margin-bottom: 0; }
+}

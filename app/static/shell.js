@@ -34,6 +34,12 @@ function showTab(name) {
 }
 
 window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
+// A page's full-screen player: hide the top and tab bars (phones only, see shell.css)
+window.addEventListener('message', (e) => {
+  if (e.origin === location.origin && e.data && e.data.type === 'smt:immersive') {
+    document.body.classList.toggle('immersive', !!e.data.on);
+  }
+});
 showTab(location.hash.slice(1));
 
 // ---- Status -----------------------------------------------------------------

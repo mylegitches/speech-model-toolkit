@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from .. import errors
 from ..settings import store as settings_store
-from . import dataset, freeform, identify, matching, speakers
+from . import dataset, freeform, identify, matching, speakers, uploads
 from .speed import length_scale, speed_files, speed_stem
 from .training import (
     ACCELERATORS,
@@ -350,6 +350,63 @@ async def api_freeform_start(
     with open(source, "wb") as out:
         await asyncio.to_thread(shutil.copyfileobj, audio.file, out, 4 * 2**20)
     take = freeform.start(voice, source, denoise, diarize or clone, original_name or audio.filename or "", clone)
+    voice.remember_microphone(mic)
+    return take
+
+
+class UploadRequest(BaseModel):
+    name: str
+    size: int
+
+
+@app.post("/api/voices/{name}/uploads")
+async def api_upload_create(name: str, body: UploadRequest) -> Dict[str, Any]:
+    """Start a resumable upload (sent in pieces, see uploads.py)."""
+    if body.size <= 0:
+        raise ValueError("The file is empty")
+    return uploads.create(store.get(name), body.name, body.size)
+
+
+@app.get("/api/voices/{name}/uploads/{upload_id}")
+async def api_upload_status(name: str, upload_id: str) -> Dict[str, Any]:
+    return uploads.status(store.get(name), upload_id)
+
+
+@app.put("/api/voices/{name}/uploads/{upload_id}")
+async def api_upload_piece(name: str, upload_id: str, offset: int, request: Request) -> Response:
+    voice = store.get(name)
+    data = bytearray()
+    async for chunk in request.stream():
+        data += chunk
+        if len(data) > uploads.MAX_CHUNK:
+            raise ValueError("Upload piece too big")
+    try:
+        received = await asyncio.to_thread(uploads.append, voice, upload_id, offset, bytes(data))
+    except ValueError as err:  # a piece for the wrong place: tell the browser where to go on
+        return Response(json.dumps({"received": err.args[0]}), status_code=409, media_type="application/json")
+    return Response(json.dumps({"received": received}), media_type="application/json")
+
+
+@app.post("/api/voices/{name}/uploads/{upload_id}/finish")
+async def api_upload_finish(
+    name: str,
+    upload_id: str,
+    denoise: str = Form("light"),
+    diarize: bool = Form(False),
+    mic: str = Form(""),
+    original_name: str = Form(""),
+    clone: bool = Form(False),
+) -> Dict[str, Any]:
+    """The last piece is in: the file becomes a take, as with POST freeform."""
+    voice = store.get(name)
+    filename = original_name.rsplit("/", 1)[-1] or "upload"
+    try:
+        part = uploads.finish(voice, upload_id)
+    except ValueError as err:
+        raise ValueError(f"The upload isn't complete yet ({err.args[0]} bytes arrived)") from None
+    source = freeform.new_take(voice, filename)
+    await asyncio.to_thread(shutil.move, str(part), str(source))
+    take = freeform.start(voice, source, denoise, diarize or clone, original_name or filename, clone)
     voice.remember_microphone(mic)
     return take
 

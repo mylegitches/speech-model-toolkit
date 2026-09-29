@@ -300,27 +300,52 @@ body.player-open .container { padding-bottom: 360px; }  /* room to scroll past t
 .manage-group > summary::-webkit-details-marker { display: none; }
 .manage-group > summary::before { content: '▸'; color: var(--muted); }
 .manage-group[open] > summary::before { content: '▾'; }
-/* Phones: docked edge to edge, big thumb-sized buttons on top, settings underneath */
-@media (max-width: 640px), (pointer: coarse) and (max-width: 900px) {
+/* Phones, portrait and landscape: the player takes the whole screen, like a video app */
+@media (max-width: 640px), (pointer: coarse) and (max-height: 540px) {
+  body.player-open { overflow: hidden; }
   .player {
-    left: 0; right: 0; bottom: 0; transform: none; width: auto; border-radius: 14px 14px 0 0;
-    border-bottom: 0; padding: 0.6rem 0.6rem calc(0.6rem + env(safe-area-inset-bottom)); gap: 0.55rem;
+    inset: 0; transform: none; width: auto; height: 100vh; height: 100dvh;
+    border: 0; border-radius: 0; box-shadow: none; background: var(--bg);
+    padding: calc(0.6rem + env(safe-area-inset-top)) calc(0.75rem + env(safe-area-inset-right))
+      calc(0.75rem + env(safe-area-inset-bottom)) calc(0.75rem + env(safe-area-inset-left));
+    gap: 0.7rem;
   }
-  .player-screen { min-height: 120px; padding: 2.2rem 0.9rem 0.9rem; }
-  .player-subtitle { font-size: 1.2rem; max-width: 100%; }
-  .player-from { padding-right: 7.5rem; }
-  .player-bar { height: 6px; }
-  .player-controls { flex-direction: column; align-items: stretch; gap: 0.6rem; }
-  .player-buttons { order: -1; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; margin-left: 0; }
-  .player-controls .player-buttons .btn { min-height: 54px; font-size: 1.45rem; padding: 0.4rem; border-radius: 12px; }
-  .player-controls .player-buttons .player-wide { font-size: 1.05rem; font-weight: 600; }
-  .player-info { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem 0.8rem; }
-  .player-pos { width: 100%; text-align: center; }
-  .player-delay { font-size: 0.9rem; }
-  .player-delay select, .player-edit { font-size: 16px; }  /* 16px+: iOS doesn't zoom in on focus */
-  .player-delay select { min-height: 40px; }
-  .player-close { top: -20px; right: 12px; width: 40px; height: 40px; font-size: 1.1rem; }
-  body.player-open .container { padding-bottom: 440px; }
+  .player-screen { flex: 1; min-height: 0; padding: 3.4rem 1rem 1.2rem; border-radius: 12px; justify-content: center; }
+  .player-subtitle { font-size: 1.5rem; max-width: 100%; }
+  .player-edit { font-size: 18px; padding: 0.7rem; }  /* 16px+: iOS doesn't zoom in on focus */
+  .player-from { top: 0.9rem; left: 0.9rem; padding-right: 3.5rem; font-size: 0.85rem; }
+  .player-badge { top: 2.5rem; right: auto; left: 0.9rem; font-size: 0.8rem; }
+  .player-bar { height: 6px; flex: none; }
+  .player-controls { flex-direction: column; align-items: stretch; gap: 0.7rem; flex: none; }
+  .player-buttons { order: -1; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; margin-left: 0; }
+  .player-controls .player-buttons .btn { min-height: 68px; font-size: 1.9rem; padding: 0.4rem; border-radius: 16px; }
+  .player-controls .player-buttons .player-wide { min-height: 60px; font-size: 1.15rem; font-weight: 600; }
+  .player-info { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 0.8rem; }
+  .player-pos { width: 100%; text-align: center; font-size: 0.95rem; }
+  .player-delay { font-size: 0.95rem; }
+  .player-delay select { font-size: 16px; min-height: 44px; }
+  .player-close {
+    top: calc(0.6rem + env(safe-area-inset-top) + 0.4rem); right: calc(0.75rem + env(safe-area-inset-right) + 0.4rem);
+    width: 44px; height: 44px; font-size: 1.2rem; z-index: 1; background: rgba(40, 44, 56, 0.9);
+  }
+  .player-keys { display: none; }
+}
+/* Landscape phone: the picture on the left, the buttons in a column on the right */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 540px) {
+  .player {
+    display: grid; grid-template-columns: 1fr minmax(280px, 42%); grid-template-rows: 1fr auto;
+    grid-template-areas: "screen controls" "bar controls"; column-gap: 0.9rem; row-gap: 0.5rem;
+  }
+  .player-screen { grid-area: screen; padding: 2.8rem 0.9rem 0.9rem; }
+  .player-subtitle { font-size: 1.3rem; }
+  .player-bar { grid-area: bar; }
+  .player-controls { grid-area: controls; justify-content: center; gap: 0.5rem; }
+  .player-buttons { gap: 0.45rem; }
+  .player-controls .player-buttons .btn { min-height: 56px; font-size: 1.6rem; }
+  .player-controls .player-buttons .player-wide { min-height: 50px; font-size: 1.05rem; }
+  .player-close { right: auto; left: calc(0.75rem + env(safe-area-inset-left) + 0.4rem); }
+  .player-from { left: 3.8rem; padding-right: 0.5rem; }
+  .player-badge { left: 3.8rem; }
 }
 @media (pointer: coarse) { .player-keys { display: none; } }  /* no keyboard: tap and swipe instead */
 .player:focus { outline: none; }

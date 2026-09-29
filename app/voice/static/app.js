@@ -746,48 +746,171 @@ makeImporter({
 });
 
 function uploadTake(blob, filename, diarize, denoise, originalName = '', label = '', status = $('#free-upload-status'), clone = false) {
+  const fields = { denoise, diarize: diarize ? 'true' : 'false', mic: micLabel || '', original_name: originalName, clone: clone ? 'true' : 'false' };
+  const what = label ? `Uploading ${label}` : 'Uploading';
+  const shown = originalName || filename;
+  status.textContent = label ? `${what}…` : '';
+  const progress = (loaded, total, note = '') => {
+    if (total > 5e6 || note) {
+      status.textContent = `${what}… ${Math.round((loaded / total) * 100)}% of ${formatSize(total)}${note ? ` · ${note}` : ''}`;
+    }
+    if (clone) {
+      cloneUi.upload = { name: shown, pct: Math.round((loaded / total) * 100), note };
+      renderPipeline();
+    }
+  };
+  const done = (ok) => {
+    status.textContent = '';
+    if (clone) { cloneUi.upload = null; renderPipeline(); }
+    loadTakes();
+    return ok;
+  };
+  // Big files go in pieces: a phone that sleeps or loses signal resumes instead of failing
+  if (blob.size > UPLOAD_PIECE) {
+    return uploadInPieces(blob, shown, fields, progress)
+      .then(() => done(true))
+      .catch((err) => { SMT.showError(`Could not import ${shown}: ${err.message}`); return done(false); });
+  }
   const form = new FormData();
   form.set('audio', blob, filename);
-  form.set('denoise', denoise);
-  form.set('diarize', diarize ? 'true' : 'false');
-  form.set('mic', micLabel || '');
-  form.set('original_name', originalName);
-  form.set('clone', clone ? 'true' : 'false');
-  const what = label ? `Uploading ${label}` : 'Uploading';
-  status.textContent = label ? `${what}…` : '';
-  // XHR (not fetch) for upload progress: a movie can take a while to send
+  for (const [k, v] of Object.entries(fields)) form.set(k, v);
+  // XHR (not fetch) for upload progress
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', voiceUrl('/freeform'));
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && e.total > 5e6) {
-        status.textContent = `${what}… ${Math.round((e.loaded / e.total) * 100)}% of ${formatSize(e.total)}`;
-      }
-      if (clone && e.lengthComputable) {
-        cloneUi.upload = { name: originalName || filename, pct: Math.round((e.loaded / e.total) * 100) };
-        renderPipeline();
-      }
-    };
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) progress(e.loaded, e.total); };
     xhr.onload = async () => {
-      status.textContent = '';
-      if (clone) { cloneUi.upload = null; renderPipeline(); }
       let ok = true;
       if (xhr.status >= 400) {
         ok = false;
         const message = await SMT.errorMessage(new Response(xhr.responseText, { status: xhr.status, statusText: xhr.statusText }));
-        SMT.showError(`Could not import ${originalName || filename}: ${message}`);
+        SMT.showError(`Could not import ${shown}: ${message}`);
       }
-      loadTakes();
-      resolve(ok);
+      resolve(done(ok));
     };
     xhr.onerror = () => {
-      status.textContent = '';
-      if (clone) { cloneUi.upload = null; renderPipeline(); }
-      SMT.showError(`Upload of ${originalName || filename} failed: the connection dropped. Check your network, and your reverse proxy’s upload size limit and timeouts.`);
-      resolve(false);
+      SMT.showError(`Upload of ${shown} failed: the connection dropped. Check your network, and your reverse proxy’s upload size limit and timeouts.`);
+      resolve(done(false));
     };
     xhr.send(form);
   });
+}
+
+// ---- Resumable uploads ----------------------------------------------------------
+// A big file goes up in 8 MB pieces. When the phone sleeps, switches apps or loses signal,
+// the upload waits and carries on from the last piece when the page is back; picking the
+// same file again (even after a reload) resumes it too. The screen is kept awake meanwhile.
+
+const UPLOAD_PIECE = 8 * 2 ** 20;
+const uploadWake = { active: 0, lock: null, wakers: new Set() };
+
+async function keepScreenOn() {
+  if (!uploadWake.active || uploadWake.lock || document.visibilityState !== 'visible' || !navigator.wakeLock) return;
+  try {
+    uploadWake.lock = await navigator.wakeLock.request('screen');
+    uploadWake.lock.addEventListener('release', () => { uploadWake.lock = null; });
+  } catch (err) { /* not allowed (battery saver…): uploads still resume */ }
+}
+
+function wakeUploads() {
+  for (const wake of [...uploadWake.wakers]) wake();
+  keepScreenOn();
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wakeUploads(); });
+window.addEventListener('online', wakeUploads);
+
+/** Wait `ms`, or less if the page comes back to the front or the network returns. */
+function uploadPause(ms) {
+  return new Promise((resolve) => {
+    const wake = () => { clearTimeout(timer); uploadWake.wakers.delete(wake); resolve(); };
+    const timer = setTimeout(wake, ms);
+    uploadWake.wakers.add(wake);
+  });
+}
+
+/** One piece by XHR (fetch has no upload progress): resolves {status, body}, rejects if the connection dropped. */
+function sendPiece(url, piece, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    xhr.timeout = 120000;
+    xhr.upload.onprogress = (e) => onProgress(e.loaded);
+    xhr.onload = () => resolve({ status: xhr.status, body: xhr.responseText, statusText: xhr.statusText });
+    xhr.onerror = xhr.ontimeout = xhr.onabort = () => reject(new Error('connection dropped'));
+    xhr.send(piece);
+  });
+}
+
+const pieceError = (res) => SMT.errorMessage(new Response(res.body, { status: res.status, statusText: res.statusText }));
+
+async function uploadInPieces(blob, name, fields, progress) {
+  const key = `voice.upload.${voice.name}.${name}|${blob.size}|${blob.lastModified || ''}`;
+  const forget = () => { try { localStorage.removeItem(key); } catch (e) { /* ignore */ } };
+  let id = null;
+  let received = 0;
+  try { id = localStorage.getItem(key); } catch (e) { /* ignore */ }
+  if (id) {
+    try { received = (await api(voiceUrl(`/uploads/${id}`))).received; } catch (err) { id = null; }
+  }
+  if (!id) {
+    id = (await postJson(voiceUrl('/uploads'), { name, size: blob.size })).id;
+    try { localStorage.setItem(key, id); } catch (e) { /* ignore */ }
+  }
+  uploadWake.active += 1;
+  keepScreenOn();
+  try {
+    let pieceSize = UPLOAD_PIECE;
+    let failures = 0;
+    const retry = async (note) => {
+      failures += 1;
+      if (failures > 40) throw new Error('the connection kept dropping. Add the file again to carry on from where it stopped.');
+      progress(received, blob.size, note);
+      await uploadPause(Math.min(30000, 1000 * 2 ** Math.min(failures, 5)));
+    };
+    progress(received, blob.size, received ? 'resuming' : '');
+    while (received < blob.size) {
+      let res;
+      try {
+        res = await sendPiece(voiceUrl(`/uploads/${id}?offset=${received}`), blob.slice(received, received + pieceSize),
+          (loaded) => progress(received + loaded, blob.size));
+      } catch (err) {
+        // Asleep, in the background or out of signal: wait, then carry on from the last piece
+        await retry('paused, waiting for the connection');
+        continue;
+      }
+      if (res.status === 409) { received = JSON.parse(res.body).received; continue; }  // the server knows better where we are
+      if (res.status === 413 && pieceSize > 2 ** 19) { pieceSize /= 2; continue; }  // a proxy's size limit: smaller pieces
+      if (res.status >= 500 && res.status !== 507) { await retry('the server had a hiccup, retrying'); continue; }
+      if (res.status >= 400) {
+        if (res.status === 404) forget();
+        throw new Error(await pieceError(res));
+      }
+      received = JSON.parse(res.body).received;
+      failures = 0;
+      progress(received, blob.size);
+    }
+    progress(received, blob.size, 'starting');
+    const form = new FormData();
+    for (const [k, v] of Object.entries(fields)) form.set(k, v);
+    for (let tried = false; ; tried = true) {
+      let res;
+      try {
+        res = await fetch(voiceUrl(`/uploads/${id}/finish`), { method: 'POST', body: form });
+      } catch (err) {
+        await retry('paused, waiting for the connection');
+        continue;
+      }
+      // An answer lost on the way the first time: the file did become a take
+      if (res.status === 404 && tried) { forget(); return null; }
+      if (res.status >= 500 && res.status !== 507) { await retry('the server had a hiccup, retrying'); continue; }
+      if (!res.ok) throw new Error(await SMT.errorMessage(res));
+      forget();
+      return res.json();
+    }
+  } finally {
+    uploadWake.active -= 1;
+    if (!uploadWake.active && uploadWake.lock) uploadWake.lock.release().catch(() => {});
+  }
 }
 
 // ---- People recognised across files ------------------------------------------
@@ -1609,8 +1732,8 @@ function renderPipeline() {
   const aiRunning = Boolean(people.identify?.running);
   const specs = [];
   if (cloneUi.upload) {
-    const { name, pct } = cloneUi.upload;
-    specs.push({ key: `upload:${name}`, file: name, stage: 'upload', note: `Uploading… ${pct}%`, pct });
+    const { name, pct, note } = cloneUi.upload;
+    specs.push({ key: `upload:${name}`, file: name, stage: 'upload', note: `Uploading… ${pct}%${note ? ` · ${note}` : ''}`, pct });
   }
   takes.filter((t) => t.state === 'running' && !/waiting for the other files/i.test(t.detail || '')).forEach((t) => {
     const [stage, pct] = prepStage(t.detail);
@@ -3301,6 +3424,11 @@ function buildPlayer() {
 
 /** Play clips [{clip, from}] one after another; mode: MANAGER or REVIEW. The Play choice
  *  (all, saved, not saved...) picks which of them. */
+/** Ask the app around this page to hide its top and tab bars (it only does on phones). */
+function immersive(on) {
+  if (window.parent !== window) window.parent.postMessage({ type: 'smt:immersive', on }, location.origin);
+}
+
 function startPlayer(source, mode = MANAGER) {
   if (!source.length) return;
   if (!player.box) buildPlayer();
@@ -3318,6 +3446,7 @@ function startPlayer(source, mode = MANAGER) {
   player.box.querySelector('.player-keys').textContent = mode.keys;
   show(player.box, true);
   document.body.classList.add('player-open');
+  immersive(true);  // phones: the player takes the whole screen, the app's bars go
   player.box.focus();
   applyPlayerFilter(null);
 }
@@ -3354,6 +3483,7 @@ function stopPlayer() {
   player.audio.pause();
   show(player.box, false);
   document.body.classList.remove('player-open');
+  immersive(false);
   document.querySelectorAll('.clip--playing').forEach((r) => r.classList.remove('clip--playing'));
 }
 

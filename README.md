@@ -37,7 +37,7 @@ The port is published on all interfaces so other machines on your network can re
 
 ### On your phone
 
-The whole app works on phones: on small screens the tabs move to a bottom bar, and buttons and fields are sized for touch. For the microphone the page must be served over **HTTPS** (e.g. behind a reverse proxy), which also lets you **add it to your home screen**: the Home tab offers this, and it then opens full screen like an app. While the Test Lab or the wake word tester is listening, the screen stays on so the phone doesn't sleep and cut the microphone.
+The whole app works on phones: on small screens the tabs move to a bottom bar, and buttons and fields are sized for touch. For the microphone the page must be served over **HTTPS** (e.g. behind a reverse proxy), which also lets you **add it to your home screen**: the Home tab offers this, and it then opens full screen like an app. While the Test Lab or the wake word tester is listening, the screen stays on so the phone doesn't sleep and cut the microphone. Files bigger than 8 MB upload in 8 MB pieces: if the phone sleeps, switches apps or loses signal, the upload pauses and carries on from the last piece when you come back (adding the same file again, even after a reload, resumes it too), and the screen is kept on while uploading. The dataset player goes full screen on a phone, in portrait and landscape, with big buttons; tap the picture to pause, swipe to change clip.
 
 Behind a reverse proxy, enable **WebSocket** support (the Test Lab and wake word tester stream audio over WebSockets) and turn off response buffering (live training logs). For nginx: `proxy_http_version 1.1`, `proxy_set_header Upgrade $http_upgrade`, `proxy_set_header Connection "upgrade"`, `proxy_buffering off`, `proxy_read_timeout 3600s`.
 
@@ -143,7 +143,7 @@ docker compose logs -f toolkit
 
 Set `LOG_LEVEL=DEBUG` under `environment:` in `docker-compose.yml` for every HTTP request too, or `WARNING` for problems only. Training runs also keep their full output in `data/voice/voices/<name>/training/train.log`.
 
-Large uploads (movies) need a generous upload limit on your reverse proxy, e.g. nginx `client_max_body_size 8g;`. Uploads are stored under `data/tmp` while they arrive, so they don't fill the container's own disk.
+Large uploads go in 8 MB pieces (smaller ones automatically if a proxy refuses that), so a proxy limit of `client_max_body_size 16m;` is enough for them; recordings under 8 MB go in one request. Uploads are stored under `data/tmp` while they arrive, so they don't fill the container's own disk.
 
 ---
 
