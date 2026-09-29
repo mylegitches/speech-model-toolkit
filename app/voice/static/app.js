@@ -3145,7 +3145,7 @@ const MANAGER = {
   ],
   toggleLabel: '🗑 Mark',
   toggleTitle: 'Mark this clip for deletion, with Save changes (D)',
-  keys: 'Space pause/play · ← → previous/next · R or ↑ replay · D mark for deletion · F fix the words · Esc close',
+  keys: 'Space pause/play · ↑ ↓ previous/next · R or ← replay · D mark for deletion · F fix the words · Esc close',
   row: (clip) => document.querySelector(`#manage-list .clip[data-id="${CSS.escape(clip.id)}"]`),
   text: (clip) => manageUi.edits.get(clip.id) ?? clip.text,
   audio: (clip) => {
@@ -3174,7 +3174,7 @@ const REVIEW = {
   ],
   toggleLabel: '✓ In / out',
   toggleTitle: 'Take this clip in, or leave it out; a saved clip comes back out of the dataset (D)',
-  keys: 'Space pause/play · ← → previous/next · R or ↑ replay · D take in / leave out · F fix the words · Esc close',
+  keys: 'Space pause/play · ↑ ↓ previous/next · R or ← replay · D take in / leave out · F fix the words · Esc close',
   row: (clip) => document.querySelector(`#character-panel .clip[data-key="${CSS.escape(clipKey(clip))}"]`),
   text: (clip) => charUi.text.get(clipKey(clip)) ?? clip.text,
   audio: (clip) => voiceUrl(`/freeform/${clip.take}/clips/${clip.index}.wav?denoise=${clip.denoise}`),
@@ -3243,10 +3243,10 @@ function buildPlayer() {
       el('label', { className: 'player-delay' }, 'Play ', el('select', { className: 'player-filter', title: 'Which clips to play' })),
       el('label', { className: 'player-delay' }, 'Pause between clips ', delay)),
     el('div', { className: 'player-buttons' },
-      button('⏮', 'Previous clip (←)', () => playerGo(player.index - 1)),
+      button('⏮', 'Previous clip (↑)', () => playerGo(player.index - 1)),
       button('⏸', 'Pause / play (Space)', () => playerToggle(), 'player-play'),
-      button('⏭', 'Next clip (→)', () => playerGo(player.index + 1)),
-      button('↺', 'Play this clip again (R or ↑)', () => playerReplay()),
+      button('⏭', 'Next clip (↓)', () => playerGo(player.index + 1)),
+      button('↺', 'Play this clip again (R or ←)', () => playerReplay()),
       button('', '', () => playerMark(), 'player-toggle player-wide'),
       button('✎ Fix', 'Correct the words: pauses; Enter keeps the change and plays on, Esc cancels (F)', () => playerEdit(), 'player-wide')));
   const close = button('✕', 'Close (Esc)', () => stopPlayer(), 'player-close');
@@ -3456,11 +3456,11 @@ document.addEventListener('keydown', (e) => {
   if (!player.box || player.box.classList.contains('hidden') || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target instanceof Element && e.target.matches('input, textarea, select')) return;
   if (e.key === ' ') { e.preventDefault(); playerToggle(); }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); playerGo(player.index + 1); }
-  else if (e.key === 'ArrowLeft') { e.preventDefault(); playerGo(player.index - 1); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); playerGo(player.index + 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); playerGo(player.index - 1); }
   else if (e.key === 'd' || e.key === 'D' || e.key === 'Delete') { e.preventDefault(); playerMark(); }
   else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); playerEdit(); }
-  else if (e.key === 'r' || e.key === 'R' || e.key === 'ArrowUp') { e.preventDefault(); playerReplay(); }
+  else if (e.key === 'r' || e.key === 'R' || e.key === 'ArrowLeft') { e.preventDefault(); playerReplay(); }
   else if (e.key === 'Escape') { e.preventDefault(); stopPlayer(); }
 });
 
