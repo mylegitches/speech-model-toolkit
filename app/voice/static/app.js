@@ -763,9 +763,14 @@ function uploadTake(blob, filename, diarize, denoise, originalName = '', label =
       if (e.lengthComputable && e.total > 5e6) {
         status.textContent = `${what}… ${Math.round((e.loaded / e.total) * 100)}% of ${formatSize(e.total)}`;
       }
+      if (clone && e.lengthComputable) {
+        cloneUi.upload = { name: originalName || filename, pct: Math.round((e.loaded / e.total) * 100) };
+        renderPipeline();
+      }
     };
     xhr.onload = async () => {
       status.textContent = '';
+      if (clone) { cloneUi.upload = null; renderPipeline(); }
       let ok = true;
       if (xhr.status >= 400) {
         ok = false;
@@ -777,6 +782,7 @@ function uploadTake(blob, filename, diarize, denoise, originalName = '', label =
     };
     xhr.onerror = () => {
       status.textContent = '';
+      if (clone) { cloneUi.upload = null; renderPipeline(); }
       SMT.showError(`Upload of ${originalName || filename} failed: the connection dropped. Check your network, and your reverse proxy’s upload size limit and timeouts.`);
       resolve(false);
     };
@@ -1062,7 +1068,8 @@ function identifyBar() {
   const bits = [info.provider && `with ${info.provider}`, info.webSearch && 'web search on',
     ai.cast && `cast: ${ai.cast}`].filter(Boolean);
   let text = bits.join(' · ');
-  if (running) text = `Asking the AI${ai.detail ? ` (${ai.detail})` : ''}… ${text}`;
+  // While it runs, the animated card above shows what it's doing
+  if (running) { /* keep the connection details */ }
   else if (ai.state === 'error') text = `Last try failed: ${ai.error}`;
   else if (ai.state === 'running') text = 'The last run was interrupted (restart). Press Identify to run it again.';
   else if (ai.at) text = `${text}${text ? ' · ' : ''}last run ${new Date(ai.at * 1000).toLocaleTimeString()}`;
@@ -1353,7 +1360,10 @@ function renderPeople() {
 // ---------------------------------------------------------------------------
 // Character clone: files -> speakers -> AI reads who says each line -> pick a character -> review
 
-const cloneUi = { filesOpen: true, showChars: false };
+const cloneUi = {
+  filesOpen: true, showChars: false,
+  cards: new Map(), justReady: new Map(), seen: null, upload: null,  // the animated pipeline
+};
 
 /** Where a Character clone file is in the process: [text, style]. */
 function cloneStage(take) {
@@ -1501,6 +1511,168 @@ function awaitingAi(takes) {
     && takes.some((t) => isCloneTake(t) && t.state === 'done' && !t.attributed);
 }
 
+// ---- Character clone: every file in progress as an animated pipeline card -----------------
+
+const PIPE_STAGES = [
+  ['upload', 'Upload'],
+  ['audio', 'Audio'],
+  ['transcribe', 'Transcribe'],
+  ['speakers', 'Speakers'],
+  ['ai', 'AI reads'],
+  ['ready', 'Ready'],
+];
+
+// One small scene per stage (48×48); they only move while their stage is the active one
+const PIPE_ICONS = {
+  upload: `<svg viewBox="0 0 48 48" aria-hidden="true"><path class="s" d="M14 35h21a8 8 0 0 0 1.2-15.9A11 11 0 0 0 15 17a9 9 0 0 0-1 18z"/>
+    <g class="i-up"><path class="s" d="M24 39V23"/><path class="s" d="m18.5 28.5 5.5-5.5 5.5 5.5"/></g></svg>`,
+  audio: `<svg viewBox="0 0 48 48" aria-hidden="true"><rect class="s" x="5" y="10" width="15" height="28" rx="2.5"/>
+    <path class="s thin" d="M8.5 15h2M8.5 21h2M8.5 27h2M8.5 33h2M14.5 15h2M14.5 21h2M14.5 27h2M14.5 33h2"/>
+    <g class="i-wave"><rect class="f" x="25" y="19" width="3" height="10" rx="1.5"/><rect class="f" x="30" y="13" width="3" height="22" rx="1.5"/>
+    <rect class="f" x="35" y="17" width="3" height="14" rx="1.5"/><rect class="f" x="40" y="21" width="3" height="6" rx="1.5"/></g></svg>`,
+  transcribe: `<svg viewBox="0 0 48 48" aria-hidden="true"><path class="s" d="M8 9h32a3 3 0 0 1 3 3v17a3 3 0 0 1-3 3H21l-8 7v-7H8a3 3 0 0 1-3-3V12a3 3 0 0 1 3-3z"/>
+    <rect class="f i-type t1" x="11" y="14.5" width="24" height="3" rx="1.5"/><rect class="f i-type t2" x="11" y="20" width="17" height="3" rx="1.5"/>
+    <rect class="f i-type t3" x="11" y="25.5" width="21" height="3" rx="1.5"/></svg>`,
+  speakers: `<svg viewBox="0 0 48 48" aria-hidden="true">
+    <g class="i-who w1"><circle class="f" cx="24" cy="17" r="5"/><path class="s" d="M15 35a9 9 0 0 1 18 0"/></g>
+    <g class="i-who w2"><circle class="f" cx="24" cy="17" r="5"/><path class="s" d="M15 35a9 9 0 0 1 18 0"/></g>
+    <g class="i-who w3"><circle class="f" cx="24" cy="17" r="5"/><path class="s" d="M15 35a9 9 0 0 1 18 0"/></g></svg>`,
+  ai: `<svg viewBox="0 0 48 48" aria-hidden="true"><rect class="s" x="7" y="6" width="26" height="35" rx="3"/>
+    <path class="s thin" d="M12 14h16M12 20h16M12 26h11M12 32h14"/>
+    <g class="i-lens"><circle class="s" cx="30" cy="29" r="6.5"/><path class="s" d="m34.8 33.8 5.7 5.7"/></g>
+    <path class="s thin i-spark" d="M41 6v6M38 9h6"/>
+    <g class="i-globe"><circle class="s thin" cx="41" cy="41" r="5"/><ellipse class="s thin" cx="41" cy="41" rx="2.2" ry="5"/><path class="s thin" d="M36 41h10"/></g></svg>`,
+  ready: `<svg viewBox="0 0 48 48" aria-hidden="true"><circle class="s i-ring" cx="24" cy="24" r="16"/><path class="s i-check" d="m16.5 24.5 5.5 5.5 10.5-11.5"/></svg>`,
+};
+
+/** Where a file being prepared is, from the server's progress text: [stage, % or null]. */
+function prepStage(detail) {
+  const d = detail || '';
+  if (/whisper|transcrib/i.test(d)) {
+    const m = d.match(/(\d+)%/);
+    return ['transcribe', m ? Number(m[1]) : null];
+  }
+  if (/speaker|analysed|found \d+/i.test(d)) {
+    const m = d.match(/(\d+)\/(\d+)/);
+    return ['speakers', m ? Math.round((Number(m[1]) / Number(m[2])) * 100) : null];
+  }
+  return ['audio', null];  // starting, extracting the sound
+}
+
+function buildPipeCard() {
+  const card = el('div', { className: 'pipe-card entering' });
+  const head = el('div', { className: 'pipe-head' }, el('span', { className: 'pipe-file' }), el('span', { className: 'pipe-note' }));
+  const track = el('div', { className: 'pipe-track' });
+  PIPE_STAGES.forEach(([key, label], i) => {
+    if (i) track.append(el('div', { className: 'pipe-link' }, el('span')));
+    const station = el('div', { className: 'pipe-station todo' });
+    station.dataset.stage = key;
+    const icon = el('div', { className: 'pipe-icon' });
+    icon.innerHTML = PIPE_ICONS[key];
+    station.append(icon, el('span', { className: 'pipe-label', textContent: label }));
+    track.append(station);
+  });
+  const bar = el('div', { className: 'pipe-bar' }, el('div', { className: 'pipe-fill' }));
+  card.append(head, track, bar);
+  requestAnimationFrame(() => card.classList.remove('entering'));
+  return card;
+}
+
+/** Update a card in place (classes only change when the stage does, so animations keep running). */
+function updatePipeCard(card, spec) {
+  card.querySelector('.pipe-file').textContent = spec.file;
+  card.querySelector('.pipe-file').title = spec.file;
+  card.querySelector('.pipe-note').textContent = spec.note;
+  card.classList.toggle('searching', Boolean(spec.searching));
+  const at = PIPE_STAGES.findIndex(([key]) => key === spec.stage);
+  card.querySelectorAll('.pipe-station').forEach((station, i) => {
+    const state = i < at ? 'done' : i === at ? 'active' : 'todo';
+    const cls = `pipe-station ${state}`;
+    if (station.className !== cls) station.className = cls;
+  });
+  card.querySelectorAll('.pipe-link').forEach((link, i) => {
+    const cls = `pipe-link ${i < at - 1 ? 'done' : i === at - 1 ? 'active' : ''}`.trim();
+    if (link.className !== cls) link.className = cls;
+  });
+  const bar = card.querySelector('.pipe-bar');
+  bar.classList.toggle('indeterminate', spec.pct == null);
+  card.querySelector('.pipe-fill').style.width = spec.pct == null ? '' : `${Math.max(2, Math.min(100, spec.pct))}%`;
+}
+
+/** Everything in flight right now, one card per file; the rest as a line of counts. */
+function renderPipeline() {
+  const box = $('#clone-pipeline');
+  if (!box) return;
+  if (recordMode !== 'clone' || !voice) { box.innerHTML = ''; cloneUi.cards.clear(); return; }
+  const takes = lastTakes.filter(isCloneTake);
+  const ai = people.ai || {};
+  const aiRunning = Boolean(people.identify?.running);
+  const specs = [];
+  if (cloneUi.upload) {
+    const { name, pct } = cloneUi.upload;
+    specs.push({ key: `upload:${name}`, file: name, stage: 'upload', note: `Uploading… ${pct}%`, pct });
+  }
+  takes.filter((t) => t.state === 'running' && !/waiting for the other files/i.test(t.detail || '')).forEach((t) => {
+    const [stage, pct] = prepStage(t.detail);
+    specs.push({ key: t.id, file: t.name || t.id, stage, note: t.detail || 'Working…', pct });
+  });
+  const reading = aiRunning && takes.find((t) => t.id === ai.take && !t.attributed);
+  // Prepared, and the AI hasn't started on it yet: the next one in line keeps its card
+  const nextForAi = !reading && people.identify?.connected
+    && [...takes].sort((a, b) => (a.created || 0) - (b.created || 0)).find((t) => t.state === 'done' && !t.attributed);
+  if (nextForAi) {
+    specs.push({ key: nextForAi.id, file: nextForAi.name || nextForAi.id, stage: 'ai', note: 'Next in line for the AI…', pct: null });
+  }
+  if (reading) {
+    const searching = Boolean(people.identify?.webSearch);
+    specs.push({
+      key: reading.id, file: reading.name || reading.id, stage: 'ai', searching,
+      note: `Working out who says what${ai.parts > 1 ? ` · part ${ai.part} of ${ai.parts}` : ''}${searching ? ' · searching the web' : ''}`,
+      pct: ai.parts ? Math.round(((ai.part - 1) / ai.parts) * 100) : null,
+    });
+  }
+  // Just finished: a moment of "Ready" before the card goes
+  const now = Date.now();
+  takes.forEach((t) => {
+    if (t.attributed && cloneUi.seen && !cloneUi.seen.has(t.id)) cloneUi.justReady.set(t.id, now);
+  });
+  cloneUi.seen = new Set(takes.filter((t) => t.attributed).map((t) => t.id));
+  cloneUi.justReady.forEach((at, id) => {
+    const take = takes.find((t) => t.id === id);
+    if (!take || now - at > 7000) { cloneUi.justReady.delete(id); return; }
+    specs.push({ key: id, file: take.name || id, stage: 'ready', note: 'Ready for review', pct: 100 });
+  });
+  if (cloneUi.justReady.size) setTimeout(renderPipeline, 7200);
+
+  // Cards: update the ones that are there, add new ones, let finished ones fade out
+  const keys = new Set(specs.map((s) => s.key));
+  cloneUi.cards.forEach((card, key) => {
+    if (keys.has(key)) return;
+    cloneUi.cards.delete(key);
+    card.classList.add('leaving');
+    setTimeout(() => card.remove(), 400);
+  });
+  let list = box.querySelector('.pipe-cards');
+  if (!list) {
+    list = el('div', { className: 'pipe-cards' });
+    box.append(list, el('div', { className: 'pipe-queue hint' }));
+  }
+  specs.forEach((spec) => {
+    let card = cloneUi.cards.get(spec.key);
+    if (!card) {
+      card = buildPipeCard();
+      cloneUi.cards.set(spec.key, card);
+      list.append(card);
+    }
+    updatePipeCard(card, spec);
+  });
+  const queued = takes.filter((t) => t.state === 'running' && /waiting for the other files/i.test(t.detail || '')).length;
+  const waitingAi = takes.filter((t) => t.state === 'done' && !t.attributed
+    && !(reading && t.id === reading.id) && !(nextForAi && t.id === nextForAi.id)).length;
+  box.querySelector('.pipe-queue').textContent = [queued && `+${queued} queued`,
+    waitingAi && `+${waitingAi} waiting for the AI`].filter(Boolean).join(' · ');
+}
+
 /** A Character clone file (or one the AI already read before that tab existed). */
 function isCloneTake(take) {
   return Boolean(take.clone || take.attributed);
@@ -1519,6 +1691,7 @@ function applyTakeFilter() {
 }
 
 function renderClone() {
+  renderPipeline();
   if (recordMode !== 'clone') return;
   const info = people.identify || {};
   const banner = $('#clone-ai');
@@ -2960,7 +3133,7 @@ const MANAGER = {
   ],
   toggleLabel: '🗑 Mark',
   toggleTitle: 'Mark this clip for deletion, with Save changes (D)',
-  keys: 'Space pause/play · ← → previous/next · D mark for deletion · F fix the words · Esc close',
+  keys: 'Space pause/play · ← → previous/next · R replay · D mark for deletion · F fix the words · Esc close',
   row: (clip) => document.querySelector(`#manage-list .clip[data-id="${CSS.escape(clip.id)}"]`),
   text: (clip) => manageUi.edits.get(clip.id) ?? clip.text,
   audio: (clip) => {
@@ -2989,7 +3162,7 @@ const REVIEW = {
   ],
   toggleLabel: '✓ In / out',
   toggleTitle: 'Take this clip in, or leave it out; a saved clip comes back out of the dataset (D)',
-  keys: 'Space pause/play · ← → previous/next · D take in / leave out · F fix the words · Esc close',
+  keys: 'Space pause/play · ← → previous/next · R replay · D take in / leave out · F fix the words · Esc close',
   row: (clip) => document.querySelector(`#character-panel .clip[data-key="${CSS.escape(clipKey(clip))}"]`),
   text: (clip) => charUi.text.get(clipKey(clip)) ?? clip.text,
   audio: (clip) => voiceUrl(`/freeform/${clip.take}/clips/${clip.index}.wav?denoise=${clip.denoise}`),
@@ -3055,6 +3228,7 @@ function buildPlayer() {
     button('⏮', 'Previous clip (←)', () => playerGo(player.index - 1)),
     button('⏸', 'Pause / play (Space)', () => playerToggle(), 'player-play'),
     button('⏭', 'Next clip (→)', () => playerGo(player.index + 1)),
+    button('↺', 'Play this clip again (R)', () => playerReplay()),
     el('span', { className: 'player-pos' }),
     el('label', { className: 'player-delay' }, 'Play ', el('select', { className: 'player-filter', title: 'Which clips to play' })),
     el('label', { className: 'player-delay' }, 'Pause between clips ', delay),
@@ -3222,6 +3396,16 @@ function playerToggle(forcePlay) {
   }
 }
 
+/** The current clip again, from the start (then carries on as usual). */
+function playerReplay() {
+  if (!player.box || player.index >= player.queue.length) return;
+  clearTimeout(player.timer);
+  player.audio.currentTime = 0;
+  player.playing = true;
+  player.box.querySelector('.player-play').textContent = '⏸';
+  player.audio.play().catch(() => {});
+}
+
 async function playerMark() {
   const entry = player.queue[player.index];
   if (!entry) return;
@@ -3262,6 +3446,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowLeft') { e.preventDefault(); playerGo(player.index - 1); }
   else if (e.key === 'd' || e.key === 'D' || e.key === 'Delete') { e.preventDefault(); playerMark(); }
   else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); playerEdit(); }
+  else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); playerReplay(); }
   else if (e.key === 'Escape') { e.preventDefault(); stopPlayer(); }
 });
 
