@@ -281,8 +281,15 @@ html[data-view="voices"] #device-banner { display: none !important; }
 .player--marked .player-subtitle { text-decoration: line-through; opacity: 0.6; }
 .player-bar { height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
 .player-fill { height: 100%; width: 0; background: var(--accent-text); transition: width 0.25s linear; }
-.player-controls { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.player-controls { display: flex; align-items: flex-end; justify-content: space-between; gap: 0.6rem 1rem; flex-wrap: wrap; }
 .player-controls .btn { padding: 0.3rem 0.65rem; min-height: 0; }
+.player-info { display: flex; flex-direction: column; gap: 0.3rem; }
+/* ⏮ ⏸ ⏭ ↺ in a row, In/out and Fix right underneath (two columns each) */
+.player-buttons { display: grid; grid-template-columns: repeat(4, minmax(2.6rem, auto)); gap: 0.35rem; margin-left: auto; }
+.player-buttons .btn { justify-content: center; }
+.player-buttons .player-wide { grid-column: span 2; }
+.player-close { position: absolute; top: -12px; right: -12px; width: 28px; height: 28px; padding: 0 !important;
+  border-radius: 50%; display: grid; place-items: center; font-size: 0.85rem; background: var(--surface-2); border: 1px solid var(--border); }
 .player-pos, .player-delay { color: var(--muted); font-size: 0.82rem; }
 .player-delay select { padding: 0.2rem 0.4rem; margin-left: 0.25rem; }
 .player-keys { font-size: 0.72rem; text-align: center; }

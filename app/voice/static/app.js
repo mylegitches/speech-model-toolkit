@@ -3224,20 +3224,22 @@ function buildPlayer() {
     el('div', { className: 'player-subtitle' }),
     el('input', { type: 'text', className: 'player-edit hidden' }));
   const bar = el('div', { className: 'player-bar' }, el('div', { className: 'player-fill' }));
+  // Left: where you are and what plays; right: the playback buttons, with In/out and Fix right under them
   const controls = el('div', { className: 'player-controls' },
-    button('⏮', 'Previous clip (←)', () => playerGo(player.index - 1)),
-    button('⏸', 'Pause / play (Space)', () => playerToggle(), 'player-play'),
-    button('⏭', 'Next clip (→)', () => playerGo(player.index + 1)),
-    button('↺', 'Play this clip again (R)', () => playerReplay()),
-    el('span', { className: 'player-pos' }),
-    el('label', { className: 'player-delay' }, 'Play ', el('select', { className: 'player-filter', title: 'Which clips to play' })),
-    el('label', { className: 'player-delay' }, 'Pause between clips ', delay),
-    el('span', { className: 'grow' }),
-    button('', '', () => playerMark(), 'player-toggle'),
-    button('✎ Fix', 'Correct the words: pauses; Enter keeps the change and plays on, Esc cancels (F)', () => playerEdit()),
-    button('✕', 'Close (Esc)', () => stopPlayer()));
+    el('div', { className: 'player-info' },
+      el('span', { className: 'player-pos' }),
+      el('label', { className: 'player-delay' }, 'Play ', el('select', { className: 'player-filter', title: 'Which clips to play' })),
+      el('label', { className: 'player-delay' }, 'Pause between clips ', delay)),
+    el('div', { className: 'player-buttons' },
+      button('⏮', 'Previous clip (←)', () => playerGo(player.index - 1)),
+      button('⏸', 'Pause / play (Space)', () => playerToggle(), 'player-play'),
+      button('⏭', 'Next clip (→)', () => playerGo(player.index + 1)),
+      button('↺', 'Play this clip again (R)', () => playerReplay()),
+      button('', '', () => playerMark(), 'player-toggle player-wide'),
+      button('✎ Fix', 'Correct the words: pauses; Enter keeps the change and plays on, Esc cancels (F)', () => playerEdit(), 'player-wide')));
+  const close = button('✕', 'Close (Esc)', () => stopPlayer(), 'player-close');
   const keys = el('div', { className: 'player-keys hint' });
-  box.append(screen, bar, controls, keys, audio);
+  box.append(close, screen, bar, controls, keys, audio);
   const filter = controls.querySelector('.player-filter');
   filter.addEventListener('change', () => {
     try { localStorage.setItem(`voice.playFilter.${player.mode.name}`, filter.value); } catch (e) { /* ignore */ }
