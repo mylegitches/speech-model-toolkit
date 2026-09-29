@@ -3020,6 +3020,18 @@ async function loadManager() {
     SMT.showError(err.message);
   }
   renderManager();
+  showDatasetLength();
+}
+
+/** The whole dataset's running time, HH:MM:SS, next to the clip count. */
+function showDatasetLength() {
+  const seconds = manageUi.clips.reduce((sum, c) => sum + (c.seconds || 0), 0);
+  const box = $('#dataset-length');
+  const s = Math.round(seconds);
+  box.querySelector('strong').textContent = [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60]
+    .map((n) => String(n).padStart(2, '0')).join(':');
+  box.title = manageUi.clips.some((c) => !c.seconds) ? 'A few clips could not be measured' : '';
+  show(box, seconds > 0);
 }
 
 function renderManager() {

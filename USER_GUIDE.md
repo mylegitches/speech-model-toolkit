@@ -70,7 +70,7 @@ Switch between datasets with the dropdown.
 | 300+ | Sounds much better. |
 | 1,000 | Excellent. |
 
-The readiness bar shows where you are. Use any of the four ways (Read sentences, Speak freely, Import file, Character clone) and mix them freely. Once there are 50 clips, **Next: train a voice model on this dataset →** takes you to the Train Voice Model tab.
+The readiness bar shows where you are, with the clip count and the running time of the whole dataset (HH:MM:SS). Use any of the four ways (Read sentences, Speak freely, Import file, Character clone) and mix them freely. Once there are 50 clips, **Next: train a voice model on this dataset →** takes you to the Train Voice Model tab.
 
 ### Read sentences
 

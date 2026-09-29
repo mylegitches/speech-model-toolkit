@@ -10,6 +10,7 @@ there, so its review shows the clip as it now is.
 import logging
 import re
 import shutil
+import subprocess
 import wave
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -38,14 +39,45 @@ def audio_path(voice: Voice, clip_id: str) -> Path:
     raise KeyError(f"No clip {clip_id}")
 
 
-def _seconds(path: Path) -> Optional[float]:
-    if path.suffix != ".wav":
-        return None
+_SECONDS: Dict[str, Tuple[float, int, Optional[float]]] = {}  # path -> (mtime, size, seconds)
+
+
+def _probe(path: Path) -> Optional[float]:
+    if path.suffix == ".wav":
+        try:
+            with wave.open(str(path)) as w:
+                return w.getnframes() / w.getframerate()
+        except (OSError, EOFError, wave.Error):
+            pass
     try:
-        with wave.open(str(path)) as w:
-            return round(w.getnframes() / w.getframerate(), 2)
-    except (OSError, EOFError, wave.Error):
+        import soundfile
+        return soundfile.info(str(path)).duration
+    except Exception:  # webm / m4a: libsndfile can't read them
+        pass
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=20,
+        ).stdout.strip()
+        return float(out)
+    except (OSError, ValueError, subprocess.SubprocessError):
         return None
+
+
+def _seconds(path: Path) -> Optional[float]:
+    """The clip's length (cached: a dataset of thousands of clips is listed often)."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    key = str(path)
+    cached = _SECONDS.get(key)
+    if cached and cached[:2] == (stat.st_mtime, stat.st_size):
+        return cached[2]
+    seconds = _probe(path)
+    seconds = round(seconds, 2) if seconds and seconds > 0 else None
+    _SECONDS[key] = (stat.st_mtime, stat.st_size, seconds)
+    return seconds
 
 
 def list_clips(voice: Voice) -> List[Dict[str, Any]]:
