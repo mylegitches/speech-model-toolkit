@@ -8,6 +8,7 @@ there, so its review shows the clip as it now is.
 """
 
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -169,3 +170,31 @@ def delete_dataset(voice: Voice) -> None:
 def _take_ids(voice: Voice) -> List[str]:
     root = voice.root / "freeform"
     return [p.name for p in root.iterdir()] if root.is_dir() else []
+
+
+def copy_dataset(voice: Voice, copy: Voice) -> None:
+    """Fork: `copy` (a new, empty voice) gets the clips, the imported files with their
+    reviews and the people found in them. Trained models stay with the original.
+    The big original video/audio files are hard-linked (they're never changed), so a
+    copy of a whole series doesn't take its size twice; everything else is copied."""
+    from . import freeform
+
+    if any(take_id in freeform._live for take_id in _take_ids(voice)):
+        raise RuntimeError("A file of this dataset is still being processed; wait for it to finish")
+
+    def copy_file(src: str, dst: str) -> str:
+        if Path(src).name.startswith("source."):
+            try:
+                os.link(src, dst)
+                return dst
+            except OSError:
+                pass  # another file system, or no hard links: a real copy
+        return shutil.copy2(src, dst)
+
+    for folder in ("recordings", "freeform"):
+        if (voice.root / folder).is_dir():
+            shutil.copytree(voice.root / folder, copy.root / folder, copy_function=copy_file)
+    for name in ("speakers.json", "voice-match.json"):
+        if (voice.root / name).is_file():
+            shutil.copy2(voice.root / name, copy.root / name)
+    _LOGGER.info("Voice %s: dataset copied to %s", voice.name, copy.name)

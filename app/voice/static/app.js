@@ -3671,6 +3671,29 @@ $('#delete-dataset').addEventListener('click', async () => {
   }
 });
 
+// Fork the dataset: a new voice with the same clips, imported files and reviews
+$('#copy-dataset').addEventListener('click', async () => {
+  const taken = new Set([...$('#voice-select').options].map((o) => o.value));
+  let suggestion = `${voice.name}_2`;
+  for (let n = 2; taken.has(suggestion); n += 1) suggestion = `${voice.name.replace(/_\d+$/, '')}_${n}`;
+  const name = window.prompt(`Copy "${voice.name}" as a new dataset: its ${voice.recorded} clips and imported files with their reviews. `
+    + 'The trained model stays with the original. Name for the copy (lower case letters, numbers, _):', suggestion);
+  if (!name || !name.trim()) return;
+  const button = $('#copy-dataset');
+  button.disabled = true;
+  button.textContent = 'Copying…';
+  try {
+    const copy = await postJson(voiceUrl('/copy'), { name });
+    rememberVoice(copy.name);
+    await loadVoices();
+  } catch (err) {
+    SMT.showError(err.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = '⧉ Copy this dataset';
+  }
+});
+
 // Voices: delete one version, or the whole model
 $('#delete-export').addEventListener('click', async () => {
   const dir = $('#export-select').value;

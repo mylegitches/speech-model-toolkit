@@ -222,6 +222,26 @@ async def api_delete_dataset(name: str) -> Dict[str, Any]:
     return {"voiceDeleted": False, "recorded": voice.num_recorded()}
 
 
+class CopyRequest(BaseModel):
+    name: str
+
+
+@app.post("/api/voices/{name}/copy")
+async def api_copy_dataset(name: str, body: CopyRequest) -> Dict[str, Any]:
+    """Fork the dataset into a new voice, to take it in another direction."""
+    voice = store.get(name)
+    new_name = re.sub(r"[^a-z0-9_]+", "_", body.name.strip().lower()).strip("_")
+    copy = store.create(new_name, voice.language, voice.gender)
+    copy.espeak_voice, copy.microphone = voice.espeak_voice, voice.microphone
+    copy.save_meta()
+    try:
+        await asyncio.to_thread(dataset.copy_dataset, voice, copy)
+    except BaseException:
+        store.delete(copy)
+        raise
+    return voice_json(copy)
+
+
 @app.delete("/api/voices/{name}/exports/{export}")
 async def api_delete_export(name: str, export: str) -> Dict[str, Any]:
     """One version of the trained voice."""
