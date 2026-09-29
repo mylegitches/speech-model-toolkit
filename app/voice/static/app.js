@@ -3133,7 +3133,7 @@ const MANAGER = {
   ],
   toggleLabel: '🗑 Mark',
   toggleTitle: 'Mark this clip for deletion, with Save changes (D)',
-  keys: 'Space pause/play · ← → previous/next · R replay · D mark for deletion · F fix the words · Esc close',
+  keys: 'Space pause/play · ← → previous/next · R or ↑ replay · D mark for deletion · F fix the words · Esc close',
   row: (clip) => document.querySelector(`#manage-list .clip[data-id="${CSS.escape(clip.id)}"]`),
   text: (clip) => manageUi.edits.get(clip.id) ?? clip.text,
   audio: (clip) => {
@@ -3162,7 +3162,7 @@ const REVIEW = {
   ],
   toggleLabel: '✓ In / out',
   toggleTitle: 'Take this clip in, or leave it out; a saved clip comes back out of the dataset (D)',
-  keys: 'Space pause/play · ← → previous/next · R replay · D take in / leave out · F fix the words · Esc close',
+  keys: 'Space pause/play · ← → previous/next · R or ↑ replay · D take in / leave out · F fix the words · Esc close',
   row: (clip) => document.querySelector(`#character-panel .clip[data-key="${CSS.escape(clipKey(clip))}"]`),
   text: (clip) => charUi.text.get(clipKey(clip)) ?? clip.text,
   audio: (clip) => voiceUrl(`/freeform/${clip.take}/clips/${clip.index}.wav?denoise=${clip.denoise}`),
@@ -3234,7 +3234,7 @@ function buildPlayer() {
       button('⏮', 'Previous clip (←)', () => playerGo(player.index - 1)),
       button('⏸', 'Pause / play (Space)', () => playerToggle(), 'player-play'),
       button('⏭', 'Next clip (→)', () => playerGo(player.index + 1)),
-      button('↺', 'Play this clip again (R)', () => playerReplay()),
+      button('↺', 'Play this clip again (R or ↑)', () => playerReplay()),
       button('', '', () => playerMark(), 'player-toggle player-wide'),
       button('✎ Fix', 'Correct the words: pauses; Enter keeps the change and plays on, Esc cancels (F)', () => playerEdit(), 'player-wide')));
   const close = button('✕', 'Close (Esc)', () => stopPlayer(), 'player-close');
@@ -3448,7 +3448,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowLeft') { e.preventDefault(); playerGo(player.index - 1); }
   else if (e.key === 'd' || e.key === 'D' || e.key === 'Delete') { e.preventDefault(); playerMark(); }
   else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); playerEdit(); }
-  else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); playerReplay(); }
+  else if (e.key === 'r' || e.key === 'R' || e.key === 'ArrowUp') { e.preventDefault(); playerReplay(); }
   else if (e.key === 'Escape') { e.preventDefault(); stopPlayer(); }
 });
 
