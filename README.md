@@ -143,7 +143,7 @@ docker compose logs -f toolkit
 
 Set `LOG_LEVEL=DEBUG` under `environment:` in `docker-compose.yml` for every HTTP request too, or `WARNING` for problems only. Training runs also keep their full output in `data/voice/voices/<name>/training/train.log`.
 
-Large uploads go in 8 MB pieces (smaller ones automatically if a proxy refuses that), so a proxy limit of `client_max_body_size 16m;` is enough for them; recordings under 8 MB go in one request. Uploads are stored under `data/tmp` while they arrive, so they don't fill the container's own disk.
+**Media library:** set `MEDIA_TV` and `MEDIA_MOVIES` in a `.env` file next to `docker-compose.yml` (e.g. `MEDIA_TV=/mnt/media/TV`) and Character clone / Import file can use episodes and movies straight from there, without uploading. The folders are mounted read only and files are linked, never copied or changed. Large uploads go in 8 MB pieces (smaller ones automatically if a proxy refuses that), so a proxy limit of `client_max_body_size 16m;` is enough for them; recordings under 8 MB go in one request. Uploads are stored under `data/tmp` while they arrive, so they don't fill the container's own disk.
 
 ---
 

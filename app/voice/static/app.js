@@ -621,11 +621,14 @@ async function readEntry(entry, prefix = '') {
  * Files and whole folders (with subfolders) can be picked or dropped; the list
  * shows them with checkboxes, and the button uploads the ticked ones in order.
  */
+/** A listed file's size: picked here (a File) or in the media library. */
+const entrySize = (e) => (e.library ? e.size || 0 : e.file.size);
+
 function makeImporter({ list, button, file, fileBtn, folder, folderBtn, drop, status, options, picked, label }) {
   const state = { files: [], skipped: 0 };
 
   function set(entries) {
-    const media = entries.filter((e) => MEDIA_FILE.test(e.path) || e.file.type.startsWith('video/') || e.file.type.startsWith('audio/'));
+    const media = entries.filter((e) => e.library || MEDIA_FILE.test(e.path) || e.file.type.startsWith('video/') || e.file.type.startsWith('audio/'));
     state.skipped = entries.length - media.length;
     // Adding to what's listed (e.g. a second season), without duplicates
     const known = new Set(state.files.map((e) => e.path));
@@ -647,7 +650,7 @@ function makeImporter({ list, button, file, fileBtn, folder, folderBtn, drop, st
       return;
     }
     show(box, true);
-    const total = chosen.reduce((sum, e) => sum + e.file.size, 0);
+    const total = chosen.reduce((sum, e) => sum + entrySize(e), 0);
     const all = el('input', { type: 'checkbox', checked: chosen.length === state.files.length, title: 'Select all' });
     all.addEventListener('change', () => { state.files.forEach((e) => { e.selected = all.checked; }); render(); });
     const clear = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Clear list' });
@@ -662,7 +665,8 @@ function makeImporter({ list, button, file, fileBtn, folder, folderBtn, drop, st
       check.addEventListener('change', () => { entry.selected = check.checked; render(); });
       rows.append(el('label', { className: 'import-file' }, check,
         el('span', { className: 'import-path', textContent: entry.path, title: entry.path }),
-        el('span', { className: 'dur', textContent: formatSize(entry.file.size) })));
+        entry.library ? el('span', { className: 'pill lib-tag', textContent: 'from library', title: 'Read from your media library: not uploaded, never changed' }) : '',
+        el('span', { className: 'dur', textContent: formatSize(entrySize(entry)) })));
     });
     box.append(rows);
   }
@@ -708,7 +712,9 @@ function makeImporter({ list, button, file, fileBtn, folder, folderBtn, drop, st
     let failed = 0;
     for (const [i, entry] of chosen.entries()) {
       const what = chosen.length > 1 ? `${i + 1} of ${chosen.length}: ${entry.path}` : entry.path;
-      const ok = await uploadTake(entry.file, entry.file.name, diarize, denoise, entry.path, what, $(status), clone);
+      const ok = entry.library
+        ? await addFromLibrary(entry, { diarize, denoise, clone }, $(status), what)
+        : await uploadTake(entry.file, entry.file.name, diarize, denoise, entry.path, what, $(status), clone);
       if (ok) entry.selected = false; else failed += 1;
       render();
       go.disabled = true;
@@ -716,21 +722,21 @@ function makeImporter({ list, button, file, fileBtn, folder, folderBtn, drop, st
     state.files = state.files.filter((e) => e.selected);  // keep the failed ones to retry
     render();
     $(status).textContent = failed
-      ? `${failed} file${failed === 1 ? '' : 's'} could not be uploaded (still listed above to retry).`
-      : (chosen.length > 1 ? `All ${chosen.length} files uploaded. They're processed one at a time.` : '');
+      ? `${failed} file${failed === 1 ? '' : 's'} could not be added (still listed above to retry).`
+      : (chosen.length > 1 ? `All ${chosen.length} files added. They're processed one at a time.` : '');
   });
 
   return { set, render, state };
 }
 
-makeImporter({
+const fileImporter = makeImporter({
   list: '#import-list', button: '#free-upload-btn', file: '#free-file', folder: '#free-folder',
   folderBtn: '#free-folder-btn', drop: '#file-mode', status: '#free-upload-status',
   label: (n) => (n > 1 ? `Import ${n} files` : 'Import'),
   options: () => ({ diarize: $('#free-diarize').checked, denoise: $('#file-denoise').value }),
   picked: (files) => {
     // Videos usually have several speakers (and a soundtrack)
-    if (files.some((e) => VIDEO_FILE.test(e.path) || e.file.type.startsWith('video/'))) {
+    if (files.some((e) => VIDEO_FILE.test(e.path) || e.file?.type.startsWith('video/'))) {
       $('#free-diarize').checked = true;
       $('#file-denoise').value = 'strong';
     }
@@ -738,12 +744,216 @@ makeImporter({
 });
 
 // Character clone: always several speakers; the AI then says who says what
-makeImporter({
+const cloneImporter = makeImporter({
   list: '#clone-list', button: '#clone-upload-btn', file: '#clone-file', fileBtn: '#clone-file-btn', folder: '#clone-folder',
   folderBtn: '#clone-folder-btn', drop: '#clone-mode', status: '#clone-status',
   label: (n) => (n > 1 ? `Add ${n} files` : 'Add'),
   options: () => ({ diarize: true, denoise: $('#clone-denoise').value, clone: true }),
 });
+
+// ---- Media library (read only) ---------------------------------------------------
+// TV and Movies folders mounted from the server: pick episodes, seasons or whole series
+// without uploading. The files are only read (linked to, never copied or changed).
+
+const libraryUi = { libraries: [], root: null, path: '', listing: null, picked: new Map(), filter: '', done: null, box: null };
+
+async function loadLibraries() {
+  try {
+    libraryUi.libraries = (await api('api/library')).libraries;
+  } catch (err) {
+    libraryUi.libraries = [];
+  }
+  document.querySelectorAll('[data-library]').forEach((b) => {
+    const lib = libraryUi.libraries.find((l) => l.id === b.dataset.library);
+    show(b, Boolean(lib && lib.mounted));
+  });
+  document.querySelectorAll('.library-buttons').forEach((row) => {
+    show(row, row.querySelector('[data-library]:not(.hidden)') !== null);
+  });
+}
+
+function buildLibraryBrowser() {
+  const box = el('div', { className: 'lib-overlay hidden', tabIndex: -1 });
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-label', 'Media library');
+  const close = el('button', { type: 'button', className: 'btn btn--ghost lib-close', textContent: '✕', title: 'Close (Esc)' });
+  close.addEventListener('click', closeLibrary);
+  const filter = el('input', { type: 'search', className: 'lib-filter', placeholder: 'Filter this folder' });
+  filter.addEventListener('input', () => { libraryUi.filter = filter.value; renderLibrary(); });
+  const all = el('button', { type: 'button', className: 'btn btn--secondary lib-all' });
+  all.addEventListener('click', () => {
+    const items = libraryItems().filter((i) => !i.added);
+    const every = items.length && items.every((i) => libraryUi.picked.has(i.path));
+    items.forEach((i) => (every ? libraryUi.picked.delete(i.path) : libraryUi.picked.set(i.path, i)));
+    renderLibrary();
+  });
+  const use = el('button', { type: 'button', className: 'btn btn--primary lib-use' });
+  use.addEventListener('click', useLibraryPicks);
+  box.append(el('div', { className: 'lib-dialog' },
+    el('div', { className: 'lib-head' }, el('div', { className: 'lib-crumbs' }), close),
+    el('div', { className: 'lib-tools' }, filter, all),
+    el('div', { className: 'lib-list' }),
+    el('div', { className: 'lib-foot' }, el('span', { className: 'lib-summary hint' }), use)));
+  box.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeLibrary(); } });
+  box.addEventListener('click', (e) => { if (e.target === box) closeLibrary(); });
+  document.body.append(box);
+  return box;
+}
+
+/** Open the browser on a library; `done(entries)` gets the picked media files. */
+function openLibrary(root, done) {
+  if (!libraryUi.box) libraryUi.box = buildLibraryBrowser();
+  Object.assign(libraryUi, { root, done, picked: new Map(), filter: '' });
+  libraryUi.box.querySelector('.lib-filter').value = '';
+  show(libraryUi.box, true);
+  document.body.classList.add('library-open');
+  immersive(true);
+  libraryGo('');
+  libraryUi.box.focus();
+}
+
+function closeLibrary() {
+  show(libraryUi.box, false);
+  document.body.classList.remove('library-open');
+  immersive(false);
+}
+
+async function libraryGo(path) {
+  const list = libraryUi.box.querySelector('.lib-list');
+  list.innerHTML = '';
+  list.append(el('p', { className: 'hint lib-empty', textContent: 'Loading…' }));
+  try {
+    libraryUi.listing = await api(voiceUrl(`/library/${libraryUi.root}?path=${encodeURIComponent(path)}`));
+    libraryUi.path = libraryUi.listing.path;
+  } catch (err) {
+    list.innerHTML = '';
+    list.append(el('p', { className: 'hint lib-empty', textContent: `Couldn't open this folder: ${err.message}` }));
+    return;
+  }
+  libraryUi.filter = '';
+  libraryUi.box.querySelector('.lib-filter').value = '';
+  renderLibrary();
+  list.scrollTop = 0;
+}
+
+function libraryItems() {
+  const { listing, filter } = libraryUi;
+  if (!listing) return [];
+  const needle = filter.trim().toLowerCase();
+  return [
+    ...listing.folders.map((f) => ({ ...f, folder: true })),
+    ...listing.files.map((f) => ({ ...f, folder: false })),
+  ].filter((i) => !needle || i.name.toLowerCase().includes(needle));
+}
+
+function renderLibrary() {
+  const { box, listing, picked } = libraryUi;
+  // Where you are: TV › The Sopranos › Season 1, each part clickable
+  const crumbs = box.querySelector('.lib-crumbs');
+  crumbs.innerHTML = '';
+  const parts = listing.path ? listing.path.split('/') : [];
+  const crumb = (text, path, current) => {
+    const b = el('button', { type: 'button', className: `lib-crumb${current ? ' current' : ''}`, textContent: text });
+    if (!current) b.addEventListener('click', () => libraryGo(path));
+    return b;
+  };
+  crumbs.append(crumb(`${libraryUi.root === 'tv' ? '📺' : '🎞️'} ${listing.label}`, '', !parts.length));
+  parts.forEach((part, i) => {
+    crumbs.append(el('span', { className: 'lib-sep', textContent: '›' }), crumb(part, parts.slice(0, i + 1).join('/'), i === parts.length - 1));
+  });
+
+  const items = libraryItems();
+  const list = box.querySelector('.lib-list');
+  list.innerHTML = '';
+  if (!items.length) {
+    list.append(el('p', { className: 'hint lib-empty', textContent: libraryUi.filter ? 'Nothing matches the filter.' : 'No folders or audio/video files here.' }));
+  }
+  items.forEach((item) => {
+    const check = el('input', { type: 'checkbox', checked: picked.has(item.path), disabled: item.added,
+      title: item.folder ? 'Take everything in this folder' : 'Take this file' });
+    check.addEventListener('change', () => {
+      if (check.checked) picked.set(item.path, item); else picked.delete(item.path);
+      renderLibraryFoot();
+    });
+    const name = el(item.folder ? 'button' : 'span', { className: `lib-name${item.folder ? ' lib-folder' : ''}`,
+      textContent: `${item.folder ? '📁' : '🎬'} ${item.name}`, title: item.folder ? 'Open' : item.name });
+    if (item.folder) {
+      name.type = 'button';
+      name.addEventListener('click', () => libraryGo(item.path));
+    }
+    const meta = item.added
+      ? el('span', { className: 'pill lib-added', textContent: 'already in this dataset' })
+      : el('span', { className: 'hint lib-meta', textContent: item.folder ? '›' : formatSize(item.size) });
+    if (item.folder) meta.addEventListener('click', () => libraryGo(item.path));
+    list.append(el('div', { className: `lib-row${item.added ? ' lib-row--added' : ''}` }, check, name, meta));
+  });
+  const free = items.filter((i) => !i.added);
+  box.querySelector('.lib-all').textContent = free.length && free.every((i) => picked.has(i.path))
+    ? 'Select none' : `Select all ${free.length}`;
+  show(box.querySelector('.lib-all'), free.length > 1);
+  renderLibraryFoot();
+}
+
+function renderLibraryFoot() {
+  const picks = [...libraryUi.picked.values()];
+  const folders = picks.filter((p) => p.folder).length;
+  const files = picks.length - folders;
+  const size = picks.reduce((sum, p) => sum + (p.size || 0), 0);
+  const what = [folders && `${folders} folder${folders === 1 ? '' : 's'}`, files && `${files} file${files === 1 ? '' : 's'}`].filter(Boolean);
+  libraryUi.box.querySelector('.lib-summary').textContent = what.length
+    ? `${what.join(' and ')} selected${files && !folders ? ` · ${formatSize(size)}` : ''} · nothing is copied: the sound is read straight from the library`
+    : 'Tick episodes, or whole seasons and series. Nothing is copied: the sound is read straight from the library.';
+  const use = libraryUi.box.querySelector('.lib-use');
+  use.disabled = !picks.length;
+  use.textContent = folders ? 'Use selected' : `Use ${files || ''} file${files === 1 ? '' : 's'}`.replace('  ', ' ');
+}
+
+async function useLibraryPicks() {
+  const use = libraryUi.box.querySelector('.lib-use');
+  use.disabled = true;
+  use.textContent = 'Finding the files…';
+  try {
+    const { files } = await postJson(voiceUrl(`/library/${libraryUi.root}/expand`), { paths: [...libraryUi.picked.keys()] });
+    const fresh = files.filter((f) => !f.added);
+    if (!fresh.length) {
+      SMT.showError(files.length ? 'Those files are all in this dataset already.' : 'No audio or video files in what you picked.');
+      renderLibraryFoot();
+      return;
+    }
+    libraryUi.done(fresh.map((f) => ({ library: f.root, path: f.path, size: f.size })), files.length - fresh.length);
+    closeLibrary();
+  } catch (err) {
+    SMT.showError(err.message);
+    renderLibraryFoot();
+  }
+}
+
+/** One library file becomes a take (linked, not uploaded). */
+async function addFromLibrary(entry, { diarize, denoise, clone }, status, what) {
+  status.textContent = `Adding ${what} from the media library…`;
+  try {
+    await postJson(voiceUrl(`/library/${entry.library}/add`), { path: entry.path, denoise, diarize: Boolean(diarize), clone: Boolean(clone) });
+    return true;
+  } catch (err) {
+    SMT.showError(`Could not add ${entry.path}: ${err.message}`);
+    return false;
+  } finally {
+    status.textContent = '';
+    loadTakes();
+  }
+}
+
+document.querySelectorAll('[data-library]').forEach((b) => {
+  b.addEventListener('click', () => {
+    const importer = b.closest('#clone-mode') ? cloneImporter : fileImporter;
+    openLibrary(b.dataset.library, (entries, skipped) => {
+      importer.set(entries);
+      if (skipped) SMT.showError(`${skipped} file${skipped === 1 ? ' is' : 's are'} in this dataset already and ${skipped === 1 ? 'was' : 'were'} left out.`);
+    });
+  });
+});
+loadLibraries();
+
 
 function uploadTake(blob, filename, diarize, denoise, originalName = '', label = '', status = $('#free-upload-status'), clone = false) {
   const fields = { denoise, diarize: diarize ? 'true' : 'false', mic: micLabel || '', original_name: originalName, clone: clone ? 'true' : 'false' };

@@ -123,6 +123,10 @@
 
       <div id="file-mode" class="mode-panel hidden">
         <p class="hint">Audio or video: voice memos, podcasts, interviews, a whole series of episodes (MP4, MKV, AVI, MOV, WMV, MP3, WAV, FLAC… up to 8 GB each). Pick files, a whole folder with its subfolders, or drag them here. For videos only the sound is used. Each file is transcribed and cut into clips for you to check. Only use recordings of people who agreed to have their voice cloned.</p>
+        <div class="row library-buttons hidden">
+          <button type="button" class="btn btn--secondary hidden" data-library="tv">📺 Use TV from media library</button>
+          <button type="button" class="btn btn--secondary hidden" data-library="movies">🎞️ Use movies from media library</button>
+        </div>
         <div class="row">
           <input type="file" id="free-file" class="grow" multiple
                  accept="audio/*,video/*,.mkv,.mp4,.m4v,.avi,.mov,.wmv,.flv,.webm,.ts,.m2ts,.mts,.mpg,.mpeg,.vob,.3gp,.ogv,.mp3,.wav,.flac,.ogg,.opus,.m4a,.m4b,.aac,.ac3,.eac3,.dts,.wma,.aiff,.aif" />
@@ -158,6 +162,10 @@
       <div id="clone-mode" class="mode-panel hidden">
         <p class="hint">Clone a character from a TV show or film. Add an episode, a season folder or a whole series (drag them here, or use the buttons). Each file is transcribed and split into voices, and the AI reads the dialogue to work out who says every line. Then pick a character and review their clips. Add more episodes any time: your character stays selected and the new clips appear in the review. Only use recordings of people who agreed to have their voice cloned.</p>
         <div id="clone-ai" class="banner banner--warning hidden"></div>
+        <div class="row library-buttons hidden">
+          <button type="button" class="btn btn--secondary hidden" data-library="tv">📺 Use TV from media library</button>
+          <button type="button" class="btn btn--secondary hidden" data-library="movies">🎞️ Use movies from media library</button>
+        </div>
         <div class="row">
           <button type="button" id="clone-file-btn" class="btn btn--secondary">🎬 Add episodes</button>
           <button type="button" id="clone-folder-btn" class="btn btn--secondary">📁 Add a season or series folder</button>

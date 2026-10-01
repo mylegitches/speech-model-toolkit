@@ -139,7 +139,7 @@ Once the person you want is marked, review the clips of each file, then use **�
 
 ### Character clone
 
-Clone one character from a TV show or film (Build Dataset → **Character clone**). It needs an AI connection (Settings → AI connections); **Import file** is the simpler way without AI: it splits the speakers and you pick one per file.
+Clone one character from a TV show or film (Build Dataset → **Character clone**). Add episodes by uploading them, or straight from your **media library**: **📺 Use TV from media library** / **🎞️ Use movies from media library** open a browser of your TV and Movies folders (click a folder to open it, tick episodes, whole seasons or a whole series, **Select all**, then **Use**). Library files aren't uploaded or copied: the sound is read straight from them, so adding a season is instant, and the library is mounted read only, so your files are never changed or deleted (discarding an episode or deleting the dataset only removes the link). Episodes already in the dataset are marked and can't be added twice. **Import file** has the same buttons. It needs an AI connection (Settings → AI connections); **Import file** is the simpler way without AI: it splits the speakers and you pick one per file.
 
 1. **Add an episode, a season folder or a whole series**: **🎬 Add episodes**, **📁 Add a season or series folder**, or drag them onto the tab, then **Add**. Background noise is removed by default (music, effects).
 2. **Each file is transcribed and split into voices**, then **the AI reads the transcript like a script** and says who speaks every line. It uses who is addressed and who replies, the voice groups, the show's cast (from TVmaze: name the show's folder, e.g. `The Sopranos/Season 1/…`, name the files `The.Sopranos.S01E01…`, keep the IMDb ID `tt…` in the name, or rely on file metadata) and, with web search on a provider that supports it (OpenRouter, Perplexity, Gemini, Anthropic, OpenAI search models, Ollama Cloud), looking lines up online. A line is **confirmed** when the AI is sure *and* its voice agrees with the rest of that character's lines in the file. While files are on their way, each gets an animated card that follows it through **Upload → Audio → Transcribe → Speakers → AI reads → Ready**, with a progress bar (more files waiting are counted underneath). The **Files** table shows where each file is (Queued, Preparing: *Transcribing 40%* / *Finding speakers*, Waiting for the AI, AI reading · part 2 of 5, Ready for review, ✓ Reviewed once clips from it are saved) and, for the character you picked, their clips (✓ confirmed / ? possible) and what your review did: **Added** to the dataset, **Edited** (saved with corrected words), **Left out** (not saved in an episode you reviewed) and **To review**, with totals. Click a **Ready for review** or **✓ Reviewed** bubble to jump to that episode in the review, opened; **Failed** or **Needs an audio track choice** jumps to the file below the table. ✕ discards a file (clips already in the dataset stay).
@@ -272,6 +272,17 @@ The Whisper model used to understand speech: **Base (English)** is a good defaul
 - **Allow downloading generated .wav files.**
 
 ---
+
+### Media library setup
+
+Put the paths of your TV and Movies folders in a file called `.env` next to `docker-compose.yml`:
+
+```
+MEDIA_TV=/mnt/media/TV
+MEDIA_MOVIES=/mnt/media/Movies
+```
+
+then `docker compose up -d`. They're mounted read only (`:ro`). **Settings → Media library** shows whether each one is ready. If a folder is on a network share, make sure the share is mounted before the container starts (otherwise it shows *not mounted*: restart the container once the share is up).
 
 ## 9. Using it on your phone
 

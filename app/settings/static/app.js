@@ -464,6 +464,32 @@ async function init() {
   navigator.mediaDevices?.addEventListener('devicechange', listDevices);
 }
 
+/** Media library: each folder, and whether the container can see it. */
+async function loadLibrary() {
+  const box = $('#library-status');
+  try {
+    const { libraries } = await SMT.request('../voice/api/library');
+    box.innerHTML = '';
+    libraries.forEach((lib) => {
+      const row = document.createElement('div');
+      row.className = 'library-row';
+      const name = document.createElement('span');
+      name.innerHTML = `${lib.id === 'tv' ? '📺' : '🎞️'} <strong></strong> <code></code>`;
+      name.querySelector('strong').textContent = lib.label;
+      name.querySelector('code').textContent = lib.path;
+      const state = document.createElement('span');
+      state.className = `library-state ${lib.mounted ? 'ok' : 'off'}`;
+      state.textContent = lib.mounted ? 'read only · ready' : 'not mounted';
+      state.title = lib.mounted ? '' : 'Empty or missing: set its path in .env (or, for a network share, check the share is mounted on the server) and restart the container';
+      row.append(name, state);
+      box.append(row);
+    });
+  } catch (err) {
+    box.textContent = `Couldn't check the media library: ${err.message}`;
+  }
+}
+loadLibrary();
+
 init();
 
 // Refresh download status and devices when the tab is shown again

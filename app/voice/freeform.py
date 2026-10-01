@@ -370,7 +370,8 @@ def start(voice: Voice, source: Path, denoise: Any = "light", diarize: bool = Fa
     take_dir = source.parent
     take_id = take_dir.name
     size = source.stat().st_size
-    if size > MAX_UPLOAD_BYTES or size < 1000:
+    # The upload limit isn't for media library files (linked, not uploaded)
+    if (size > MAX_UPLOAD_BYTES and not source.is_symlink()) or size < 1000:
         shutil.rmtree(take_dir, ignore_errors=True)
         raise ValueError("The file is empty" if size < 1000 else "The file is larger than 8 GB")
     if not stt.available():

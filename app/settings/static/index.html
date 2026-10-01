@@ -99,6 +99,13 @@
       <p class="hint">Sends the transcripts and file names of Character clone files to your AI provider (and the show name/IMDb ID to TVmaze). Needs an active connection in AI connections above.</p>
     </section>
 
+    <!-- Media library (read only) -->
+    <section class="card" data-section="library">
+      <h2>Media library</h2>
+      <p class="hint">Your TV and Movies folders, for Character clone and Import file to use without uploading. They're mounted <strong>read only</strong>: files are only read, never changed or deleted. Set the paths in <code>.env</code> next to docker-compose.yml (<code>MEDIA_TV=…</code>, <code>MEDIA_MOVIES=…</code>), then run <code>docker compose up -d</code>.</p>
+      <div id="library-status" class="library-status"></div>
+    </section>
+
     <!-- Speech recognition -->
     <section class="card" data-section="speech">
       <div class="card-head">

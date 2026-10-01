@@ -29,3 +29,12 @@
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 99px;
   padding: 0.4rem 1rem; font-size: 0.85rem; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
 }
+
+/* Media library */
+.library-status { display: flex; flex-direction: column; gap: 0.4rem; }
+.library-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap;
+  padding: 0.55rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); }
+.library-row code { color: var(--muted); font-size: 0.82rem; }
+.library-state { font-size: 0.75rem; padding: 0.1rem 0.55rem; border-radius: 99px; }
+.library-state.ok { background: rgba(34, 197, 94, 0.15); color: var(--success); }
+.library-state.off { background: rgba(245, 158, 11, 0.15); color: var(--warning); }

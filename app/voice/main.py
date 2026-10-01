@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from .. import errors
 from ..settings import store as settings_store
-from . import dataset, freeform, identify, matching, speakers, uploads
+from . import dataset, freeform, identify, library, matching, speakers, uploads
 from .speed import length_scale, speed_files, speed_stem
 from .training import (
     ACCELERATORS,
@@ -372,6 +372,50 @@ async def api_freeform_start(
     take = freeform.start(voice, source, denoise, diarize or clone, original_name or audio.filename or "", clone)
     voice.remember_microphone(mic)
     return take
+
+
+# ---- Media library (read only) ----------------------------------------------------
+
+
+@app.get("/api/library")
+async def api_library() -> Dict[str, Any]:
+    """The TV and Movies libraries, and whether they're mounted."""
+    return {"libraries": await asyncio.to_thread(library.status)}
+
+
+@app.get("/api/voices/{name}/library/{root}")
+async def api_library_browse(name: str, root: str, path: str = "") -> Dict[str, Any]:
+    """One folder: its subfolders and media files (marked when already in this dataset)."""
+    return await asyncio.to_thread(library.browse, store.get(name), root, path)
+
+
+class LibraryPick(BaseModel):
+    paths: List[str]
+
+
+@app.post("/api/voices/{name}/library/{root}/expand")
+async def api_library_expand(name: str, root: str, pick: LibraryPick) -> Dict[str, Any]:
+    """Picked files and folders as the list of media files they contain."""
+    return {"files": await asyncio.to_thread(library.expand, store.get(name), root, pick.paths)}
+
+
+class LibraryAdd(BaseModel):
+    path: str
+    denoise: str = "light"
+    diarize: bool = False
+    clone: bool = False
+
+
+@app.post("/api/voices/{name}/library/{root}/add")
+async def api_library_add(name: str, root: str, body: LibraryAdd) -> Dict[str, Any]:
+    """A library file becomes a take without copying it: the take's source links to it
+    (read only). Discarding the take removes the link, never the file."""
+    voice = store.get(name)
+    real = await asyncio.to_thread(library.source_for, root, body.path)
+    source = freeform.new_take(voice, real.name)
+    os.symlink(real, source)
+    # On the event loop, like an upload: start() schedules the processing task
+    return freeform.start(voice, source, body.denoise, body.diarize or body.clone, body.path, body.clone)
 
 
 class UploadRequest(BaseModel):

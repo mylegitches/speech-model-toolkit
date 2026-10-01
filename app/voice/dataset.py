@@ -183,6 +183,9 @@ def copy_dataset(voice: Voice, copy: Voice) -> None:
         raise RuntimeError("A file of this dataset is still being processed; wait for it to finish")
 
     def copy_file(src: str, dst: str) -> str:
+        if Path(src).is_symlink():  # a file in the media library: link to it too, never copy it
+            os.symlink(os.readlink(src), dst)
+            return dst
         if Path(src).name.startswith("source."):
             try:
                 os.link(src, dst)
