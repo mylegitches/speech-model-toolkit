@@ -276,6 +276,33 @@ def merge(voice: Voice, person_id: str, into_id: str, retag: Any) -> Dict[str, A
     return public(voice)
 
 
+def drop_take(voice: Voice, take_id: str, name: str = "") -> None:
+    """A file was discarded: it leaves the people too (their files, sample lines and
+    file metadata). Someone heard only in that file goes altogether."""
+    with _lock:
+        data = load(voice)
+        gone = set()
+        for person in data["people"]:
+            if take_id in person.get("takes", []):
+                person["takes"] = [t for t in person["takes"] if t != take_id]
+                if not person["takes"]:
+                    gone.add(person["id"])
+            if name and person.get("lines"):
+                person["lines"] = [line for line in person["lines"] if line.get("file") != name]
+            if (person.get("sample") or {}).get("take") == take_id:
+                person["sample"] = None
+        if gone:
+            data["people"] = [p for p in data["people"] if p["id"] not in gone]
+            if data["target"] in gone:
+                data["target"] = None
+            data["focus"] = [x for x in data["focus"] if x not in gone]
+            data["notSame"] = [pair for pair in data["notSame"] if not gone.intersection(pair)]
+        if name:
+            data.get("files", {}).pop(name, None)
+        _save(voice, data)
+    _LOGGER.info("Voice %s: file %s left the people (%d gone with it)", voice.name, take_id, len(gone))
+
+
 def forget_take(voice: Voice, take_id: str) -> None:
     """A take was saved or discarded: its samples can't be played any more."""
     with _lock:

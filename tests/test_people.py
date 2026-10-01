@@ -112,3 +112,28 @@ def test_focus_survives_merges(tmp_path):
     assert speakers.public(voice)["focus"] == ["p3", "p2"]
     with pytest.raises(KeyError):
         speakers.set_focus(voice, ["p9"])
+
+
+def test_drop_take_removes_the_file_from_the_people(tmp_path):
+    from app.voice import speakers
+    from app.voice.voices import VoiceStore
+
+    voice = VoiceStore(tmp_path).create("v", "en-US", "male")
+    data = speakers.load(voice)
+    data["people"] = [
+        {"id": "p1", "name": "Paulie", "takes": ["a", "b"], "sample": {"take": "b", "index": 1},
+         "lines": [{"text": "hi", "file": "show/a.mkv"}, {"text": "yo", "file": "other/b.mkv"}]},
+        {"id": "p2", "name": "Chucky", "takes": ["b"], "lines": [{"text": "hey", "file": "other/b.mkv"}]},
+    ]
+    data["target"], data["focus"], data["notSame"] = "p2", ["p1", "p2"], [["p1", "p2"]]
+    data["files"] = {"show/a.mkv": {}, "other/b.mkv": {}}
+    speakers._save(voice, data)
+
+    speakers.drop_take(voice, "b", "other/b.mkv")
+    data = speakers.load(voice)
+    assert [p["id"] for p in data["people"]] == ["p1"]  # only heard in b: gone
+    paulie = data["people"][0]
+    assert paulie["takes"] == ["a"] and paulie["sample"] is None
+    assert [line["file"] for line in paulie["lines"]] == ["show/a.mkv"]
+    assert data["target"] is None and data["focus"] == ["p1"] and data["notSame"] == []
+    assert list(data["files"]) == ["show/a.mkv"]

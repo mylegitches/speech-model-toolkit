@@ -662,5 +662,7 @@ def retag_person(voice: Voice, take_id: str, old: str, new: str) -> None:
 def discard(voice: Voice, take_id: str) -> None:
     if take_id in _live:
         raise RuntimeError("Still processing; wait for it to finish")
-    shutil.rmtree(_take_dir(voice, take_id), ignore_errors=True)
-    people.forget_take(voice, take_id)
+    take_dir = _take_dir(voice, take_id)
+    name = _read(take_dir).get("name", "") if (take_dir / "take.json").is_file() else ""
+    shutil.rmtree(take_dir, ignore_errors=True)
+    people.drop_take(voice, take_id, name)
