@@ -14,17 +14,20 @@ Endpoints:
 """
 
 import asyncio
+import io
 import logging
 import os
+import re
 import shutil
 import tempfile
 import uuid
+import zipfile
 import struct
 import numpy as np
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -313,6 +316,28 @@ async def download_tflite(job_id: str):
 async def list_models():
     """Return all trained .onnx models in the output directory."""
     return {"models": pl.list_models()}
+
+
+@app.get("/api/models/{name}/download/{kind}")
+async def download_model(name: str, kind: str):
+    """Any trained wake word, any time: .onnx, .tflite, or a .zip of both."""
+    onnx = pl.find_model(name) if re.fullmatch(r"[\w.-]+", name) and not name.startswith(".") else None
+    if onnx is None:
+        raise HTTPException(status_code=404, detail=f"No wake word model {name}.")
+    if kind in ("onnx", "tflite"):
+        path = onnx.with_suffix(f".{kind}")
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail=f"This model has no .{kind} file.")
+        return FileResponse(str(path), media_type="application/octet-stream", filename=path.name)
+    if kind != "zip":
+        raise HTTPException(status_code=404, detail="Download .onnx, .tflite or .zip.")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in (onnx, onnx.with_suffix(".tflite")):
+            if path.is_file():
+                archive.write(path, path.name)
+    return Response(buffer.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{onnx.stem}.zip"'})
 
 
 # ---------------------------------------------------------------------------

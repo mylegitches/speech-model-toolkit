@@ -448,10 +448,48 @@ async function loadModels() {
       modelSelect.appendChild(opt);
     });
     micBtn.disabled = models.length === 0;
+    renderLibrary(models);
   } catch (e) {
     console.warn("Could not load models:", e);
   }
 }
+/** 4. Your wake words: each trained model with its downloads, newest first. */
+function renderLibrary(models) {
+  const box = document.getElementById("model-library");
+  box.innerHTML = "";
+  if (!models.length) {
+    box.innerHTML = '<p class="hint">None yet: train one above.</p>';
+    return;
+  }
+  [...models].sort((a, b) => (b.created || 0) - (a.created || 0)).forEach(m => {
+    const url = (kind) => `api/models/${encodeURIComponent(m.name)}/download/${kind}`;
+    const link = (kind, text, cls) => {
+      const a = document.createElement("a");
+      a.className = `btn ${cls}`;
+      a.href = url(kind);
+      a.download = `${m.name}.${kind}`;
+      a.textContent = text;
+      return a;
+    };
+    const row = document.createElement("div");
+    row.className = "model-row";
+    const info = document.createElement("div");
+    info.className = "model-info";
+    const name = document.createElement("strong");
+    name.textContent = m.name.replace(/_/g, " ");
+    const meta = document.createElement("span");
+    meta.className = "hint";
+    meta.textContent = `${m.size_kb} KB${m.created ? ` · ${new Date(m.created * 1000).toLocaleDateString()}` : ""}`;
+    info.append(name, meta);
+    const buttons = document.createElement("div");
+    buttons.className = "model-buttons";
+    buttons.append(link("zip", "⬇ .zip", "btn--download"), link("onnx", ".onnx", "btn--secondary"));
+    if (m.tflite) buttons.append(link("tflite", ".tflite", "btn--secondary"));
+    row.append(info, buttons);
+    box.appendChild(row);
+  });
+}
+
 loadModels();
 // Refresh model list after a training job completes
 document.addEventListener("trainingDone", loadModels);

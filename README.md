@@ -57,7 +57,7 @@ Behind a reverse proxy, enable **WebSocket** support (the Test Lab and wake word
 
    You can also run it from the command line: `docker compose run --rm toolkit python scripts/prepare_wakeword_data.py` (add `--skip-acav` if you'll provide `features_neg.npy` yourself).
 2. **Wake phrase**: type a phrase (letters, numbers and spaces, max 6 words). **Preview** plays it in one of the synthetic voices used for training.
-3. **Train**: Generate → Augment → Train → Export, with a live log. Then download `.zip`, `.onnx` or `.tflite`.
+3. **Train**: Generate → Augment → Train → Export, with a live log. Then download `.zip`, `.onnx` or `.tflite`. Every wake word trained so far stays downloadable in **4. Your wake words**.
 4. **Test**: pick a model and a microphone, click **Start Listening** and say the phrase. The ring lights up on detection. Audio streams to the container as 16 kHz PCM over a WebSocket and openWakeWord scores every 80 ms frame.
 
 Training settings (1000 samples, 10k steps, ...) are in `app/wakeword/config_template.yaml`.

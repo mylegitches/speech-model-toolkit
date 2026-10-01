@@ -44,6 +44,7 @@ The tabs keep working in the background. You can start a voice training, switch 
 4. **2. Train:** click **Train** and watch the four stages: Generate → Augment → Train → Export. About 7–10 minutes; a GPU isn't needed.
 5. When it's done, download the **.zip** (both formats) or just **.onnx** / **.tflite**.
 6. **3. Test:** pick the model and your microphone, click **Start Listening** and say the phrase. The ring lights up green when it's detected. If it triggers too easily or too rarely, change **Wake word sensitivity** in Settings → Audio.
+7. **4. Your wake words** lists every wake word trained here, newest first, with **⬇ .zip** (both files), **.onnx** and **.tflite** downloads, so you can download any of them again later.
 
 **Using it in Home Assistant:** copy the `.tflite` file into the `/share/openwakeword` folder of Home Assistant (the openWakeWord add-on picks up custom models there), restart the add-on, and choose the wake word in **Settings → Voice assistants**.
 

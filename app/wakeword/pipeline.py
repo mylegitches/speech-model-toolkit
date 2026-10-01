@@ -226,6 +226,8 @@ def list_models() -> list[dict]:
             "name": onnx_file.stem,
             "path": str(onnx_file.relative_to(OUTPUT_DIR)),
             "size_kb": round(onnx_file.stat().st_size / 1024),
+            "tflite": onnx_file.with_suffix(".tflite").is_file(),
+            "created": onnx_file.stat().st_mtime,
         }
         for onnx_file in sorted(OUTPUT_DIR.rglob("*.onnx"))
     ]
