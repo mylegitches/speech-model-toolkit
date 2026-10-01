@@ -8,6 +8,10 @@ services:
       - "8765:8765"
     volumes:
       - ./data:/data
+      # Your media library, read only (:ro): the app can never change or delete these files.
+      # Set the paths in .env next to this file, e.g. MEDIA_TV=/mnt/media/TV
+      - ${MEDIA_TV:-./data/no-media-tv}:/media/tv:ro
+      - ${MEDIA_MOVIES:-./data/no-media-movies}:/media/movies:ro
     environment:
       - LOG_LEVEL=INFO  # DEBUG for every request, WARNING for problems only
     extra_hosts:

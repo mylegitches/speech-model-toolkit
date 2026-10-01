@@ -1,6 +1,9 @@
 # Everything the app stores: training data, models, voices
 /data/
 
+# Local settings for docker compose (media library paths)
+.env
+
 # Python
 __pycache__/
 *.py[cod]
