@@ -372,6 +372,15 @@ class Workspace:
 
         return max(checkpoints, key=lambda p: p.stat().st_mtime)
 
+    def checkpoint_epoch(self) -> Optional[int]:
+        """Epoch of the newest saved checkpoint (from its file name), if any."""
+        latest = self.latest_checkpoint()
+        if latest is None:
+            return None
+        epochs = [int(m.group(1)) for p in latest.parent.glob("epoch=*.ckpt")
+                  if (m := re.match(r"epoch=(\d+)", p.name))]
+        return max(epochs) if epochs else None
+
     def exports(self) -> List[Dict[str, Any]]:
         """Exported voices, newest epoch first."""
         exports = []
@@ -402,6 +411,7 @@ class Workspace:
             "exporting": self.exporting,
             "error": self.error,
             "hasCheckpoint": self.latest_checkpoint() is not None,
+            "checkpointEpoch": self.checkpoint_epoch(),
             "exports": self.exports(),
             "settings": asdict(self.settings) if self.settings else None,
         }

@@ -3171,6 +3171,18 @@ function renderExports(s) {
   show($('#export-btn'), s.hasCheckpoint && (s.state === 'running' || exports.length === 0 || s.exporting));
   $('#export-btn').disabled = s.exporting;
   $('#export-btn').textContent = s.exporting ? 'Exporting…' : 'Export latest version now';
+  // Train tab: export while training, or a checkpoint that was never exported (training cut off by a crash or restart)
+  const newest = exports.length ? exports[0].epoch : -1;
+  const unexported = s.state !== 'running' && s.checkpointEpoch != null && s.checkpointEpoch > newest;
+  const trainExport = $('#train-export-btn');
+  show(trainExport, s.hasCheckpoint && (s.state === 'running' || unexported || s.exporting));
+  trainExport.disabled = s.exporting;
+  trainExport.textContent = s.exporting ? 'Exporting…'
+    : (s.state === 'running' ? '⬇ Export latest version now' : `⬇ Export epoch ${s.checkpointEpoch}`);
+  show($('#train-export-note'), unexported && !s.exporting);
+  $('#train-export-note').textContent = unexported
+    ? `Training reached epoch ${s.checkpointEpoch} but it was never exported (training was cut off, e.g. by a restart). Export it to use it in Voices, or press Train and choose to continue from the latest checkpoint.`
+    : '';
 
   const select = $('#export-select');
   const key = exports.map((e) => e.dir).join(',');
@@ -3247,6 +3259,7 @@ function updateDownloads() {
 }
 
 $('#export-select').addEventListener('change', updateDownloads);
+$('#train-export-btn').addEventListener('click', () => $('#export-btn').click());
 $('#export-btn').addEventListener('click', async () => {
   try {
     renderStatus(await postJson(voiceUrl('/export')));

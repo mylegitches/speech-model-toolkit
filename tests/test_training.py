@@ -31,3 +31,15 @@ def test_damaged_cached_checkpoint_is_downloaded_again(tmp_path, monkeypatch):
     assert any("damaged" in line for line in ws.log)
     # Next time the good copy is used as is
     assert asyncio.run(manager._get_checkpoint(ws, URL)) == cached and len(downloads) == 1
+
+
+def test_checkpoint_epoch_after_a_crash(tmp_path):
+    """Training cut off before exporting: the newest checkpoint's epoch is reported."""
+    ws = training.Workspace(voice=Voice(name="tony", language="en-US", espeak_voice="en-us", root=tmp_path))
+    assert ws.checkpoint_epoch() is None
+    run = ws.train_dir / "lightning_logs" / "version_1" / "checkpoints"
+    run.mkdir(parents=True)
+    for name in ("epoch=4663-val_mel=0.4490.ckpt", "epoch=6015-val_mel=0.4506.ckpt", "last.ckpt"):
+        (run / name).write_bytes(b"x")
+    assert ws.checkpoint_epoch() == 6015
+    assert ws.status()["checkpointEpoch"] == 6015

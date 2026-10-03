@@ -186,6 +186,8 @@ The **Train Voice Model** tab: pick the dataset in **1. Dataset to train on**, t
 4. **Train more** continues where the last run stopped: add more clips and train again to improve the voice.
 5. **Next: listen to it, set the speed and download it in Voices →** appears once there's a version to hear.
 
+If training was cut off before it could export (the server restarted or froze), nothing is lost up to the last checkpoint: Train Voice Model shows **⬇ Export epoch N** to turn it into a version in Voices, and **Train** with *continue from the latest checkpoint* carries on from there. While training runs, **⬇ Export latest version now** lets you hear how it's going.
+
 **Advanced settings:** starting voices from other languages, your own checkpoint, training from scratch (very slow), hours, epochs, batch size (lower it if the GPU runs out of memory), device and sample rate.
 
 A GPU makes a huge difference: hours instead of days. If voice training runs on the CPU, the Home tab says *CPU only*.
