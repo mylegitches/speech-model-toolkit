@@ -3562,6 +3562,7 @@ function buildPlayer() {
   delay.value = String(playerDelay());
   delay.addEventListener('change', () => {
     try { localStorage.setItem('voice.playDelay', delay.value); } catch (e) { /* ignore */ }
+    if (player.queue.length && player.index < player.queue.length) showPlayerPos(player.index);  // time left changes
     box.focus();  // the keys work again straight away
   });
   const box = el('div', { className: 'player hidden', tabIndex: -1 });
@@ -3693,7 +3694,7 @@ function applyPlayerFilter(current) {
   const at = current ? player.queue.findIndex((entry) => entry.clip === current) : -1;
   if (at >= 0) {
     player.index = at;
-    player.box.querySelector('.player-pos').textContent = `${at + 1} of ${player.queue.length}`;
+    showPlayerPos(at);
   } else {
     playerGo(0);
   }
@@ -3730,6 +3731,20 @@ function highlightRow(clip) {
   }
 }
 
+/** A clip's length: dataset clips know it, review clips have start and end. */
+const clipSeconds = (clip) => clip.seconds ?? (clip.end != null && clip.start != null ? clip.end - clip.start : 0);
+
+/** "34 of 465 · 41:20 left of 1:52:10": the clips still to hear, with the pauses between them. */
+function showPlayerPos(index) {
+  const pause = playerDelay();
+  const lengths = player.queue.map(({ clip }) => clipSeconds(clip) + pause);
+  const total = lengths.reduce((a, b) => a + b, 0);
+  const left = lengths.slice(index).reduce((a, b) => a + b, 0);
+  const pos = player.box.querySelector('.player-pos');
+  pos.textContent = `${index + 1} of ${player.queue.length}` + (total > 0 ? ` · ${clock(left)} left of ${clock(total)}` : '');
+  pos.title = 'Time left: this clip and the ones after it, with the pause between clips';
+}
+
 function playerGo(index) {
   clearTimeout(player.timer);
   if (index < 0) index = 0;
@@ -3751,7 +3766,7 @@ function playerGo(index) {
   subtitle.textContent = player.mode.text(clip);
   subtitle.classList.remove('hidden');
   box.querySelector('.player-edit').classList.add('hidden');
-  box.querySelector('.player-pos').textContent = `${index + 1} of ${player.queue.length}`;
+  showPlayerPos(index);
   playerBadge();
   player.audio.src = player.mode.audio(clip);
   player.playing = true;
