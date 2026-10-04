@@ -77,9 +77,101 @@ def rule(rows, cuts, use):
     return [r for r in rows if r["confirmed"] and not any(cuts[c][1](cuts[c][0](r)) for c in use)]
 
 
+def refresh_labels(rows, voice_dir):
+    """The person's decisions as they are now (the review may have changed since measuring)."""
+    from pathlib import Path
+    takes = {}
+    out = []
+    for r in rows:
+        if r["take"] not in takes:
+            f = Path(voice_dir) / "freeform" / r["take"] / "take.json"
+            takes[r["take"]] = json.loads(f.read_text())["segments"] if f.is_file() else None
+        segs = takes[r["take"]]
+        if segs is None or r["index"] >= len(segs):
+            continue
+        s = segs[r["index"]]
+        r["saved"], r["confirmed"] = bool(s.get("saved")), bool(s.get("confirmed"))
+        out.append(r)
+    return out
+
+
+def scores(rows, accepted):
+    kept_all = sum(r["saved"] for r in rows)
+    good = sum(r["saved"] for r in accepted)
+    return good / max(1, len(accepted)), good / max(1, kept_all), len(accepted)
+
+
+def tune(rows, base, beta=0.5, levels=(0, 1, 2, 5, 10, 15, 20, 30)):
+    """Per check, how strict (a percentile of the kept clips' values) to maximise F-beta:
+    beta 0.5 counts a wrongly accepted clip twice as bad as a good one missed."""
+    kept = [r for r in rows if r["saved"]]
+    cut_at = {}
+    for check, get, higher in CHECKS:
+        values = [get(r) for r in kept]
+        cut_at[check] = {lv: (np.percentile(values, lv if higher else 100 - lv) if lv else None) for lv in levels}
+
+    def accept(choice, pool):
+        res = []
+        for r in pool:
+            if base == "confirmed" and not r["confirmed"]:
+                continue
+            ok = True
+            for check, get, higher in CHECKS:
+                cut = cut_at[check][choice[check]]
+                if cut is not None and ((get(r) < cut) if higher else (get(r) > cut)):
+                    ok = False
+                    break
+            if ok:
+                res.append(r)
+        return res
+
+    def fbeta(choice):
+        p, rcl, _ = scores(rows, accept(choice, rows))
+        return (1 + beta ** 2) * p * rcl / max(1e-9, beta ** 2 * p + rcl)
+
+    choice = {c: 0 for c, _, _ in CHECKS}
+    best = fbeta(choice)
+    for _ in range(4):  # coordinate ascent
+        improved = False
+        for check, _, _ in CHECKS:
+            for lv in levels:
+                trial = {**choice, check: lv}
+                f = fbeta(trial)
+                if f > best + 1e-6:
+                    best, choice, improved = f, trial, True
+        if not improved:
+            break
+    return choice, cut_at, accept
+
+
 def main():
-    for path in sys.argv[1:]:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    voices_root = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--voices=")), None)
+    for path in args:
         rows = load(path)
+        if voices_root:
+            name = path.rsplit("/", 1)[-1].removesuffix(".jsonl")
+            rows = refresh_labels(rows, f"{voices_root}/{name}")
+        if "--tune" in sys.argv:
+            files = sorted({r["take"] for r in rows})
+            half_a = set(files[::2])
+            train = [r for r in rows if r["take"] in half_a]
+            test = [r for r in rows if r["take"] not in half_a]
+            kept_n, all_n = sum(r["saved"] for r in rows), len(rows)
+            conf = [r for r in rows if r["confirmed"]]
+            print(f"\n=== {path.rsplit('/', 1)[-1]}: {all_n} clips measured, {kept_n} kept by you "
+                  f"({kept_n / all_n:.0%}); AI-confirmed: {len(conf)}, of which you kept "
+                  f"{sum(r['saved'] for r in conf) / max(1, len(conf)):.0%} ===")
+            for base in ("confirmed", "all"):
+                choice, cut_at, accept = tune(train, base)
+                on = {c: lv for c, lv in choice.items() if lv}
+                p_tr, r_tr, n_tr = scores(train, accept(choice, train))
+                p_te, r_te, n_te = scores(test, accept(choice, test))
+                print(f"\n  start from {'AI-confirmed clips' if base == 'confirmed' else 'every clip'}; tuned on half the episodes:")
+                print(f"    rule: " + ", ".join(f"{c} (drop the worst {lv}%)" for c, lv in on.items()) if on else "    rule: no extra checks")
+                print(f"    tuning half:  accepts {n_tr:4}, you'd keep {p_tr:6.1%}, finds {r_tr:6.1%} of your kept clips")
+                print(f"    test half:    accepts {n_te:4}, you'd keep {p_te:6.1%}, finds {r_te:6.1%} of your kept clips")
+            continue
         kept, out, conf, cuts = report(path.rsplit("/", 1)[-1], rows)
         print("\ncombined rules (confirmed + all listed checks pass):")
         for use in (

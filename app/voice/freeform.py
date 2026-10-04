@@ -129,14 +129,76 @@ def get_take(voice: Voice, take_id: str) -> Dict[str, Any]:
 # ---- Splitting -------------------------------------------------------------------
 
 
-def split_words(words: List[Any], duration: float, turns: bool = False) -> List[Dict[str, Any]]:
+ENERGY_STEP = 0.01   # seconds per loudness reading for finding cut points
+
+
+def loudness(audio: np.ndarray, rate: int) -> np.ndarray:
+    """Loudness (dB) every ENERGY_STEP seconds: where the cuts between clips can go."""
+    n = max(1, int(rate * ENERGY_STEP))
+    frames = audio[: len(audio) // n * n].reshape(-1, n).astype(np.float64)
+    db = 10 * np.log10((frames ** 2).mean(axis=1) + 1e-10)
+    # a little smoothing so one quiet sample between syllables doesn't look like a pause
+    return np.convolve(db, np.ones(3) / 3, mode="same") if len(db) >= 3 else db
+
+
+class _Cuts:
+    """Find real pauses in the sound around Whisper's (approximate) word times."""
+
+    def __init__(self, db: np.ndarray):
+        self.db = db
+        speech, floor = np.percentile(db, 90), np.percentile(db, 10)
+        self.quiet = max(floor + 6, speech - 30)   # this quiet: no voice
+        self.silent_enough = speech - 20           # quieter than this: an acceptable cut
+
+    def _i(self, t: float) -> int:
+        return int(min(max(t / ENERGY_STEP, 0), len(self.db) - 1))
+
+    def valley(self, lo: float, hi: float):
+        """The quietest moment between lo and hi: (time, its loudness)."""
+        a, b = self._i(lo), self._i(hi)
+        if b <= a:
+            return lo, float(self.db[a])
+        k = a + int(np.argmin(self.db[a:b + 1]))
+        return k * ENERGY_STEP, float(self.db[k])
+
+    def fade_out(self, t: float, limit: float) -> float:
+        """From a word's estimated end, on until the voice has really stopped (or limit)."""
+        i, stop = self._i(t), self._i(limit)
+        run = 0
+        while i < stop:
+            run = run + 1 if self.db[i] < self.quiet else 0
+            if run >= 5:              # 50 ms of quiet
+                return min(limit, (i - 4) * ENERGY_STEP + 0.05)
+            i += 1
+        return limit
+
+    def fade_in(self, t: float, limit: float) -> float:
+        """From a word's estimated start, back until the voice really starts (or limit)."""
+        i, stop = self._i(t), self._i(limit)
+        run = 0
+        while i > stop:
+            run = run + 1 if self.db[i] < self.quiet else 0
+            if run >= 5:
+                return max(limit, (i + 4) * ENERGY_STEP - 0.05)
+            i -= 1
+        return limit
+
+
+def split_words(words: List[Any], duration: float, turns: bool = False,
+                db: Optional[np.ndarray] = None) -> List[Dict[str, Any]]:
     """Group Whisper words (with .start/.end/.word) into clips.
 
     A clip ends at a sentence end once it is 2 s long, at any pause >= PAUSE,
     at a short pause once it is SOFT_MAX_CLIP long, and never exceeds MAX_CLIP.
     With turns=True it also ends wherever Whisper started a new segment
     (usually a change of speaker), words marked with .segment_start.
+
+    With the audio's loudness (db, see loudness()), cuts go where the sound really
+    is quiet rather than where Whisper's word times say: Whisper often ends a word
+    early, and the rest of it would land in the next clip. A sentence end or short
+    pause with no real quiet in it doesn't split (it's one stretch of speech).
     """
+    cuts = _Cuts(db) if db is not None and len(db) > 10 else None
     clips: List[List[Any]] = []
     current: List[Any] = []
     for word in words:
@@ -144,27 +206,43 @@ def split_words(words: List[Any], duration: float, turns: bool = False) -> List[
             gap = word.start - current[-1].end
             length = current[-1].end - current[0].start
             sentence_end = current[-1].word.strip()[-1:] in ".!?…"
-            if (
-                gap >= PAUSE
-                or (sentence_end and length >= 2.0 and gap >= 0.1)
-                or (length >= SOFT_MAX_CLIP and gap >= SHORT_PAUSE)
-                or word.end - current[0].start > MAX_CLIP
-                or (turns and getattr(word, "segment_start", False))
-            ):
+            forced = (gap >= PAUSE or word.end - current[0].start > MAX_CLIP
+                      or (turns and getattr(word, "segment_start", False)))
+            optional = (sentence_end and length >= 2.0 and gap >= 0.1) or (length >= SOFT_MAX_CLIP and gap >= SHORT_PAUSE)
+            if optional and not forced and cuts is not None:
+                _, level = cuts.valley(current[-1].end - 0.1, word.start + 0.05)
+                optional = level < cuts.silent_enough   # no real pause: keep going
+            if forced or optional:
                 clips.append(current)
                 current = []
         current.append(word)
     if current:
         clips.append(current)
 
+    # One cut between each pair of clips: the quietest moment between their words, looking
+    # a little past Whisper's times on both sides (kept between the two words' estimates)
+    bounds = []
+    if cuts is not None:
+        for left, right in zip(clips, clips[1:]):
+            t = cuts.valley(left[-1].end - 0.1, right[0].start + 0.05)[0]
+            lo, hi = sorted((left[-1].end, right[0].start))
+            bounds.append(min(max(t, lo), hi))
+
     segments = []
     for i, clip in enumerate(clips):
-        # Pad around the words (Whisper timings are approximate), but only up
-        # to the middle of the pause so neighbouring clips never overlap
         prev_end = clips[i - 1][-1].end if i > 0 else 0.0
         next_start = clips[i + 1][0].start if i + 1 < len(clips) else duration
-        start = max((prev_end + clip[0].start) / 2 if i > 0 else 0.0, clip[0].start - 0.2, 0.0)
-        end = min((clip[-1].end + next_start) / 2 if i + 1 < len(clips) else duration, clip[-1].end + 0.3, duration)
+        if cuts is None:
+            # Pad around the words (Whisper timings are approximate), but only up
+            # to the middle of the pause so neighbouring clips never overlap
+            start = max((prev_end + clip[0].start) / 2 if i > 0 else 0.0, clip[0].start - 0.2, 0.0)
+            end = min((clip[-1].end + next_start) / 2 if i + 1 < len(clips) else duration, clip[-1].end + 0.3, duration)
+        else:
+            before = bounds[i - 1] if i > 0 else max(0.0, clip[0].start - 0.4)
+            after = bounds[i] if i + 1 < len(clips) else min(duration, clip[-1].end + 0.8)
+            # Don't carry a long silence along: stop shortly after the voice fades
+            start = cuts.fade_in(clip[0].start, before)
+            end = cuts.fade_out(clip[-1].end, after)
         text = "".join(w.word for w in clip).strip()
         if end - start >= MIN_CLIP and text:
             segments.append({"start": round(start, 2), "end": round(end, 2), "text": text})
@@ -304,7 +382,8 @@ def _transcribe(take_dir: Path, source: Path, model_id: str, language: str, turn
         for i, word in enumerate(segment.words or []):
             words.append(_Word(word, i == 0))
         progress(f"Transcribing… {min(99, int(segment.end / duration * 100))}%")
-    return {"duration": round(duration, 1), "segments": split_words(words, duration, turns)}
+    return {"duration": round(duration, 1),
+            "segments": split_words(words, duration, turns, loudness(audio, 16000))}
 
 
 async def _diarize(voice: Voice, take_dir: Path, take: Dict[str, Any], progress: Callable[[str], None]) -> None:

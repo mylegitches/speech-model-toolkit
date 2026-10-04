@@ -36,8 +36,12 @@ def main() -> None:
     parser.add_argument("voice")
     parser.add_argument("character", nargs="?")
     parser.add_argument("--out", default="/data/quality")
+    parser.add_argument("--all", action="store_true", help="every clip of the character, not only confirmed or kept ones")
+    parser.add_argument("--threads", type=int, default=0, help="limit CPU threads (0 = all)")
     args = parser.parse_args()
 
+    if args.threads:
+        torch.set_num_threads(args.threads)
     voice = store.get(args.voice)
     takes = []
     for take_dir in sorted((voice.root / "freeform").iterdir()):
@@ -54,14 +58,18 @@ def main() -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"{voice.name}.jsonl"
+    # Measured before, with the noise removal the file still uses (else measured again)
+    denoise = {tid: t.get("denoise") for tid, t in takes}
     done = set()
     if path.exists():
         for line in path.read_text().splitlines():
             row = json.loads(line)
-            done.add((row["take"], row["index"]))
+            if denoise.get(row["take"]) == row.get("denoise"):
+                done.add((row["take"], row["index"]))
 
     todo = [(tid, t, i, s) for tid, t in takes for i, s in enumerate(t["segments"])
-            if s.get("character") == character and (s.get("confirmed") or s.get("saved")) and (tid, i) not in done]
+            if s.get("character") == character and (args.all or s.get("confirmed") or s.get("saved"))
+            and (tid, i) not in done]
     print(f"{len(todo)} clips to measure ({len(done)} done before)", flush=True)
 
     embed = load_embedder(Path("/data/voice/speaker-match"))
@@ -81,7 +89,12 @@ def main() -> None:
             text = seg.get("savedText") or seg.get("text", "")
             model_id = take.get("model") or "small.en"
             if model_id not in whisper:
-                whisper[model_id] = stt._load(model_id)
+                if args.threads:
+                    from faster_whisper import WhisperModel
+                    whisper[model_id] = WhisperModel(model_id, device="cpu", compute_type="int8",
+                                                     cpu_threads=args.threads, download_root=str(stt.MODELS_DIR))
+                else:
+                    whisper[model_id] = stt._load(model_id)
             row = {
                 "take": take_id, "index": index, "file": take.get("name", ""), "text": text,
                 "saved": bool(seg.get("saved")), "confirmed": bool(seg.get("confirmed")),
