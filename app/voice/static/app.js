@@ -953,6 +953,15 @@ document.querySelectorAll('[data-library]').forEach((b) => {
   });
 });
 loadLibraries();
+// A library on a network share may come up after the page (or the server) did: look again
+// when the tab is shown or the page comes back, and every 30 s while one is missing
+window.addEventListener('message', (e) => {
+  if (e.origin === location.origin && e.data?.type === 'smt:shown') loadLibraries();
+});
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') loadLibraries(); });
+setInterval(() => {
+  if (document.visibilityState === 'visible' && libraryUi.libraries.some((l) => !l.mounted)) loadLibraries();
+}, 30000);
 
 
 function uploadTake(blob, filename, diarize, denoise, originalName = '', label = '', status = $('#free-upload-status'), clone = false) {
