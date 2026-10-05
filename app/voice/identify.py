@@ -623,6 +623,7 @@ def character_clips(voice: Voice, name: str) -> Dict[str, Any]:
                 "text": segment.get("savedText") or segment["text"],
                 "start": segment["start"], "end": segment["end"], "conf": segment.get("conf"),
                 "saved": bool(segment.get("saved")), "denoise": take.get("denoise") or "off",
+                "trimmed": "original" in segment,
             }
             if segment.get("confirmed"):
                 confirmed.append(clip)

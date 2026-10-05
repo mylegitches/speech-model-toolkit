@@ -24,6 +24,7 @@ import io
 import json
 import logging
 import os
+import difflib
 import re
 import shutil
 import subprocess
@@ -670,6 +671,101 @@ def save_clips(voice: Voice, clips: List[Dict[str, Any]]) -> int:
         _write(take_dir, take)
     _LOGGER.info("Voice %s: saved %d clips from %d files as recordings", voice.name, saved, len(by_take))
     return saved
+
+
+MIN_TRIMMED = 0.4  # seconds a trimmed clip keeps at least
+
+
+def words_still_heard(text: str, heard: str, front: bool, back: bool) -> str:
+    """The text without the words a trim cut off: on the trimmed side(s), words that
+    Whisper no longer hears in the clip are dropped. The rest (and any corrections the
+    person made) stays as written. Nothing heard at all: the text is left alone."""
+    tokens = text.split()
+    norm = lambda w: re.sub(r"[^a-z0-9]", "", w.lower())  # "Chucky's" = "chuckys"
+    mine = [norm(t) for t in tokens]
+    theirs = [norm(w) for w in heard.split() if norm(w)]
+    if not tokens or not theirs:
+        return text
+    matcher = difflib.SequenceMatcher(None, mine, theirs, autojunk=False)
+    matched = [i for block in matcher.get_matching_blocks() for i in range(block.a, block.a + block.size)]
+    if not matched:
+        return text
+    first = min(matched) if front else 0
+    last = max(matched) if back else len(tokens) - 1
+    kept = tokens[first:last + 1]
+    if front and first > 0 and kept and tokens[0][:1].isupper():
+        kept[0] = kept[0][:1].upper() + kept[0][1:]  # still starts like a sentence
+    return " ".join(kept) or text
+
+
+def _hear(voice: Voice, take: Dict[str, Any], take_id: str, index: int) -> str:
+    """What Whisper hears in one clip on its own."""
+    import io as _io
+    wav = clip_wav(voice, take_id, index)
+    with wave.open(_io.BytesIO(wav), "rb") as src:
+        rate = src.getframerate()
+        audio = np.frombuffer(src.readframes(src.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
+    if rate != 16000:
+        from scipy.signal import resample_poly
+        audio = resample_poly(audio, 16000, rate).astype(np.float32)
+    model_id = take.get("model") or _model_for(voice)
+    model = stt._load(model_id)
+    segments, _ = model.transcribe(audio, language=None if model_id.endswith(".en") else voice.language.split("-")[0],
+                                   beam_size=5, condition_on_previous_text=False, vad_filter=False)
+    return " ".join(seg.text for seg in segments)
+
+
+MIN_TRIMMED = 0.4  # seconds a trimmed clip keeps at least
+
+
+def trim_clip(voice: Voice, take_id: str, index: int, front: float = 0.0, back: float = 0.0,
+              reset: bool = False, text: Optional[str] = None) -> Dict[str, Any]:
+    """Cut a bit off the start and/or end of a clip (a laugh, another voice), or undo
+    all trims. Words cut off go from the text (`text`: the words as shown in the review,
+    with any corrections). A clip already in the dataset gets its saved audio and text
+    redone too."""
+    take_dir = _take_dir(voice, take_id)
+    if take_id in _live:
+        raise RuntimeError("That file is still being processed; wait for it to finish")
+    take = _read(take_dir)
+    segments = take["segments"]
+    if not 0 <= index < len(segments):
+        raise KeyError(f"No clip {index}")
+    seg = segments[index]
+    original = seg.get("original") or [seg["start"], seg["end"]]
+    current = " ".join((text if text is not None else (seg.get("savedText") or seg["text"])).split())
+    if reset:
+        start, end = original
+        words = seg.get("originalText") or current
+    else:
+        start = seg["start"] + max(0.0, float(front))
+        end = seg["end"] - max(0.0, float(back))
+        if end - start < MIN_TRIMMED:
+            raise ValueError(f"That would leave less than {MIN_TRIMMED:g} s of the clip")
+        words = current
+    if "originalText" not in seg and not reset:
+        seg["originalText"] = current
+    seg["start"], seg["end"] = round(start, 3), round(end, 3)
+    if [seg["start"], seg["end"]] == [round(original[0], 3), round(original[1], 3)]:
+        seg.pop("original", None)
+        seg.pop("originalText", None)
+    else:
+        seg["original"] = original
+    if not reset and (front or back):
+        try:
+            words = words_still_heard(words, _hear(voice, take, take_id, index), front > 0, back > 0)
+        except Exception as err:  # noqa: BLE001 - the trim still counts; the words stay
+            _LOGGER.warning("Couldn't re-check the words of %s/%d after a trim: %s", take_id, index, err)
+    if seg.get("saved"):
+        seg["savedText"] = words
+    else:
+        seg["text"] = words
+    _write(take_dir, take)
+    if seg.get("saved"):
+        voice.save_recording(GROUP, f"{take_id}_{index:04d}", words, clip_wav(voice, take_id, index), ".wav")
+    _LOGGER.info("Voice %s: clip %s/%d %s (%.2f-%.2f s)", voice.name, take_id, index,
+                 "trims undone" if reset else "trimmed", seg["start"], seg["end"])
+    return {"start": seg["start"], "end": seg["end"], "trimmed": "original" in seg, "text": words}
 
 
 def set_saved_text(voice: Voice, take_id: str, index: int, text: str) -> str:

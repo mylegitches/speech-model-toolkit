@@ -222,6 +222,22 @@ async def api_delete_dataset(name: str) -> Dict[str, Any]:
     return {"voiceDeleted": False, "recorded": voice.num_recorded()}
 
 
+class TrimRequest(BaseModel):
+    take: str
+    index: int
+    front: float = 0.0   # seconds to cut off the start
+    back: float = 0.0    # seconds to cut off the end
+    reset: bool = False  # undo all trims
+    text: Optional[str] = None  # the words as shown in the review (with corrections)
+
+
+@app.post("/api/voices/{name}/clips/trim")
+async def api_trim_clip(name: str, body: TrimRequest) -> Dict[str, Any]:
+    """Trim a clip in the review (and in the dataset, when it's saved)."""
+    return await asyncio.to_thread(freeform.trim_clip, store.get(name), body.take, body.index,
+                                   body.front, body.back, body.reset, body.text)
+
+
 class CopyRequest(BaseModel):
     name: str
 

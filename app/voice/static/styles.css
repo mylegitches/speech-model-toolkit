@@ -494,3 +494,11 @@ body.library-open { overflow: hidden; }
   .lib-use { min-height: 48px; font-size: 1.05rem; }
   .lib-close { min-width: 44px; min-height: 44px; font-size: 1.2rem; }
 }
+
+/* Trim a review clip a quarter second at a time */
+.clip-trims { display: inline-flex; gap: 0.15rem; flex: none; }
+.clip-trims .btn { padding: 0.2rem 0.4rem; min-height: 0; font-size: 0.75rem; white-space: nowrap; }
+body.trimming { cursor: progress; }
+@media (max-width: 640px), (pointer: coarse) and (max-height: 540px) {
+  .player-controls .player-buttons .player-trim { min-height: 48px; font-size: 1rem; }
+}

@@ -2327,6 +2327,32 @@ function fileSummary(clips, ticked) {
     `${n} ticked`].filter(Boolean).join(' · ');
 }
 
+const TRIM_STEP = 0.25;  // seconds per click
+
+/** Trim a review clip (and its saved copy, if it's in the dataset), then play it again. */
+async function trimClip(clip, body, redraw, play = true) {
+  const key = clipKey(clip);
+  // Words cut off come off the text: send the words as they are now (with corrections)
+  const words = charUi.text.get(key) ?? clip.text;
+  document.body.classList.add('trimming');
+  try {
+    const result = await postJson(voiceUrl('/clips/trim'), { take: clip.take, index: clip.index, text: words, ...body });
+    Object.assign(clip, result);
+    charUi.text.delete(key);  // the server's text is the current one now
+  } catch (err) {
+    SMT.showError(err.message);
+    return false;
+  } finally {
+    document.body.classList.remove('trimming');
+  }
+  if (redraw) redraw();
+  // Hear the result straight away (the row was redrawn: use its new play button)
+  const row = document.querySelector(`.clip[data-key="${CSS.escape(key)}"]`);
+  const button = play && row && row.querySelector('button');
+  if (button) playClip({ id: clip.take, denoise: clip.denoise }, clip.index, button);
+  return true;
+}
+
 function characterClipRow(clip, ticked, changed) {
   const key = clipKey(clip);
   // Saved clips stay in the list, coloured, so you can see what's already in the dataset
@@ -2375,7 +2401,20 @@ function characterClipRow(clip, ticked, changed) {
     changed();
   });
   markEdited();
-  row.append(keep, play, text, status);
+  // Trim a quarter second off the start or end (a laugh, someone else's last word); click again for more
+  const trimBtn = (label, title, body) => {
+    const b = el('button', { type: 'button', className: 'btn btn--ghost clip-trim', textContent: label, title });
+    b.addEventListener('click', async () => {
+      trims.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+      if (!await trimClip(clip, body, () => row.rerender())) trims.querySelectorAll('button').forEach((x) => { x.disabled = false; });
+    });
+    return b;
+  };
+  const trims = el('span', { className: 'clip-trims' },
+    trimBtn('✂ start', 'Trim ¼ second off the start (click again for more)', { front: TRIM_STEP }),
+    trimBtn('end ✂', 'Trim ¼ second off the end (click again for more)', { back: TRIM_STEP }));
+  if (clip.trimmed) trims.append(trimBtn('↺', 'Undo the trims', { reset: true }));
+  row.append(keep, play, text, trims, status);
   const outer = clip.reason
     ? el('div', { className: 'clip-with-reason' }, row, el('small', { className: 'hint', textContent: clip.reason }))
     : row;
@@ -2782,7 +2821,7 @@ async function playClip(take, index, button) {
   clipButton = button;
   button.textContent = '■';
   audio.onended = () => { button.textContent = label; clipButton = null; };
-  audio.src = voiceUrl(`/freeform/${take.id}/clips/${index}.wav?denoise=${take.denoise}`);
+  audio.src = voiceUrl(`/freeform/${take.id}/clips/${index}.wav?denoise=${take.denoise}&t=${Date.now()}`);
   await SMT.applyOutput(audio);
   audio.play().catch(() => { button.textContent = label; });
 }
@@ -3529,10 +3568,11 @@ const REVIEW = {
   ],
   toggleLabel: '✓ In / out',
   toggleTitle: 'Take this clip in, or leave it out; a saved clip comes back out of the dataset (D)',
-  keys: 'Space pause/play · ↑ ↓ previous/next · R or ← replay · D take in / leave out · F fix the words · Esc close',
+  keys: 'Space pause/play · ↑ ↓ previous/next · R or ← replay · [ ] trim ¼ s off the start / end · D take in / leave out · F fix the words · Esc close',
   row: (clip) => document.querySelector(`#character-panel .clip[data-key="${CSS.escape(clipKey(clip))}"]`),
   text: (clip) => charUi.text.get(clipKey(clip)) ?? clip.text,
-  audio: (clip) => voiceUrl(`/freeform/${clip.take}/clips/${clip.index}.wav?denoise=${clip.denoise}`),
+  // (start/end in the address: a trimmed clip is never played from an old copy)
+  audio: (clip) => voiceUrl(`/freeform/${clip.take}/clips/${clip.index}.wav?denoise=${clip.denoise}&at=${clip.start}-${clip.end}`),
   badge: (clip) => (clip.saved ? ['✓ Saved', 'ok'] : charUi.ticked?.(clip) ? ['Will be saved', 'ok'] : ['Left out', 'bad']),
   async toggle(clip) {
     const key = clipKey(clip);
@@ -3604,7 +3644,9 @@ function buildPlayer() {
       button('⏭', 'Next clip (↓)', () => playerGo(player.index + 1)),
       button('↺', 'Play this clip again (R or ←)', () => playerReplay()),
       button('', '', () => playerMark(), 'player-toggle player-wide'),
-      button('✎ Fix', 'Correct the words: pauses; Enter keeps the change and plays on, Esc cancels (F)', () => playerEdit(), 'player-wide')));
+      button('✎ Fix', 'Correct the words: pauses; Enter keeps the change and plays on, Esc cancels (F)', () => playerEdit(), 'player-wide'),
+      button('✂ start', 'Trim ¼ second off the start of this clip ([)', () => playerTrim('front'), 'player-wide player-trim'),
+      button('end ✂', 'Trim ¼ second off the end of this clip (])', () => playerTrim('back'), 'player-wide player-trim')));
   const close = button('✕', 'Close (Esc)', () => stopPlayer(), 'player-close');
   const keys = el('div', { className: 'player-keys hint' });
   box.append(close, screen, bar, controls, keys, audio);
@@ -3677,6 +3719,7 @@ function startPlayer(source, mode = MANAGER) {
   toggle.textContent = mode.toggleLabel;
   toggle.title = mode.toggleTitle;
   player.box.querySelector('.player-keys').textContent = mode.keys;
+  player.box.querySelectorAll('.player-trim').forEach((b) => show(b, mode === REVIEW));  // review clips only
   show(player.box, true);
   document.body.classList.add('player-open');
   immersive(true);  // phones: the player takes the whole screen, the app's bars go
@@ -3801,6 +3844,19 @@ function playerToggle(forcePlay) {
 }
 
 /** The current clip again, from the start (then carries on as usual). */
+/** Review player: trim ¼ s off the current clip's start or end, then hear it again. */
+async function playerTrim(side) {
+  if (!player.box || player.index >= player.queue.length || player.trimming) return;
+  const { clip } = player.queue[player.index];
+  player.trimming = true;
+  clearTimeout(player.timer);
+  player.audio.pause();
+  const row = document.querySelector(`.clip[data-key="${CSS.escape(clipKey(clip))}"]`);
+  const ok = await trimClip(clip, { [side]: TRIM_STEP }, () => row && row.rerender && row.rerender(), false);
+  player.trimming = false;
+  if (ok) playerGo(player.index);  // the trimmed clip and its words, from the start
+}
+
 function playerReplay() {
   if (!player.box || player.index >= player.queue.length) return;
   clearTimeout(player.timer);
@@ -3851,6 +3907,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'd' || e.key === 'D' || e.key === 'Delete') { e.preventDefault(); playerMark(); }
   else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); playerEdit(); }
   else if (e.key === 'r' || e.key === 'R' || e.key === 'ArrowLeft') { e.preventDefault(); playerReplay(); }
+  else if ((e.key === '[' || e.key === ']') && player.mode === REVIEW) { e.preventDefault(); playerTrim(e.key === '[' ? 'front' : 'back'); }
   else if (e.key === 'Escape') { e.preventDefault(); stopPlayer(); }
 });
 
