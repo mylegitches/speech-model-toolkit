@@ -4,6 +4,7 @@ services:
   toolkit:
     build: .
     image: speech-model-toolkit
+    container_name: speech-model-toolkit  # `docker logs speech-model-toolkit`
     ports:
       - "8765:8765"
     volumes:
