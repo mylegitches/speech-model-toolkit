@@ -2191,23 +2191,56 @@ function renderCharacter() {
   const ticked = (clip) => charUi.keep.get(clipKey(clip)) ?? (!clip.possible && !reviewed.has(clip.take));
   charUi.ticked = ticked;  // the player shows and changes the same state
 
+  const sectionUpdaters = [];
   const section = (title, clips, possibleSection) => {
     if (!clips.length) return;
     clips.forEach((c) => { c.possible = possibleSection; });
     const head = el('div', { className: 'group-head' }, el('strong', { textContent: `${title} (${clips.length})` }));
-    const all = el('button', { type: 'button', className: 'btn btn--ghost', textContent: possibleSection ? 'Tick all' : 'Untick all' });
+    // One button that offers what would change: Tick all while anything is unticked, else Untick all
+    // (the section's not-yet-saved clips; saved ones stay saved)
+    const all = el('button', { type: 'button', className: 'btn btn--ghost' });
+    const sectionAllTicked = () => clips.every((c) => c.saved || ticked(c));
+    const updateAll = () => {
+      all.textContent = sectionAllTicked() ? 'Untick all' : 'Tick all';
+      all.title = `${sectionAllTicked() ? 'Untick' : 'Tick'} every ${title.toLowerCase()} clip not saved yet`;
+    };
     all.addEventListener('click', () => {
-      clips.forEach((c) => { if (!c.saved) charUi.keep.set(clipKey(c), possibleSection); });
+      const on = !sectionAllTicked();
+      clips.forEach((c) => { if (!c.saved) charUi.keep.set(clipKey(c), on); });
       renderCharacter();
     });
+    sectionUpdaters.push(updateAll);
+    updateAll();
     const playAll = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '▶ Play all',
       title: `Listen to all ${title.toLowerCase()} clips, episode by episode` });
     playAll.addEventListener('click', () => startPlayer(clips.map((clip) => ({ clip, from: `${clip.file} · ${title}` })), REVIEW));
-    head.append(playAll, all);
     const box = el('section', { className: 'character-group' }, head);
+    head.append(playAll, expandToggle(box, 'episodes'), all);
     const byFile = new Map();
     clips.forEach((c) => { if (!byFile.has(c.take)) byFile.set(c.take, []); byFile.get(c.take).push(c); });
+    // Grouped by season when the files have seasons ("Season 2/...", "S02E05")
+    const seasons = new Map();
     [...byFile.values()].forEach((fileClips) => {
+      const n = seasonOf(fileClips[0].file);
+      if (!seasons.has(n)) seasons.set(n, []);
+      seasons.get(n).push(fileClips);
+    });
+    const bySeason = seasons.size > 1 || (seasons.size === 1 && !seasons.has(null));
+    [...seasons.keys()].sort((a, b) => (a ?? 1e9) - (b ?? 1e9)).forEach((n) => {
+      let target = box;
+      if (bySeason) {
+        const group = el('div', { className: 'char-season' });
+        const files = seasons.get(n).length;
+        group.append(el('div', { className: 'char-season-head' },
+          el('strong', { textContent: n == null ? 'Other files' : `Season ${n}` }),
+          el('span', { className: 'hint', textContent: `${files} episode${files === 1 ? '' : 's'}` }),
+          expandToggle(group, 'episodes')));
+        box.append(group);
+        target = group;
+      }
+      seasons.get(n).forEach((fileClips) => addFile(fileClips, target));
+    });
+    function addFile(fileClips, target) {
       const id = `${possibleSection ? 'p' : 'c'}:${fileClips[0].take}`;
       const details = el('details', { className: 'char-file' });
       details.dataset.id = id;
@@ -2217,7 +2250,20 @@ function renderCharacter() {
       details.open = shown.has(id) ? wasOpen.has(id) : fresh;
       if (details.open) charUi.open.add(id);
       const label = el('span', { className: 'char-file-name', textContent: fileSummary(fileClips, ticked) });
-      const refresh = () => { label.textContent = fileSummary(fileClips, ticked); updateSave(); };
+      const fileAllTicked = () => fileClips.every((c) => c.saved || ticked(c));
+      const tickToggle = el('button', { type: 'button', className: 'btn btn--ghost' });
+      const updateTick = () => {
+        const on = fileAllTicked();
+        tickToggle.textContent = on ? 'Untick all' : 'Tick all';
+        tickToggle.title = on ? 'Untick every clip of this file, and take its saved clips out of the dataset'
+          : 'Tick every clip of this file';
+      };
+      const refresh = () => {
+        label.textContent = fileSummary(fileClips, ticked);
+        updateTick();
+        sectionUpdaters.forEach((f) => f());
+        updateSave();
+      };
       // Tick or untick a whole file, open or not. Untick all also takes its saved clips
       // out of the dataset (like unticking them one by one); Tick all leaves them saved.
       const tickFile = (on) => async (e) => {
@@ -2247,11 +2293,8 @@ function renderCharacter() {
         }
         refresh();
       };
-      const tickAll = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Tick all' });
-      tickAll.addEventListener('click', tickFile(true));
-      const untickAll = el('button', { type: 'button', className: 'btn btn--ghost', textContent: 'Untick all',
-        title: 'Untick every clip of this file, and take its saved clips out of the dataset' });
-      untickAll.addEventListener('click', tickFile(false));
+      tickToggle.addEventListener('click', (e) => tickFile(!fileAllTicked())(e));
+      updateTick();
       const playFile = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '▶ Play',
         title: 'Listen to this episode\'s clips one after another; D takes one in or leaves it out, F fixes the words' });
       playFile.addEventListener('click', (e) => {
@@ -2259,7 +2302,7 @@ function renderCharacter() {
         e.stopPropagation();
         startPlayer(fileClips.map((clip) => ({ clip, from: `${clip.file} · ${title}` })), REVIEW);
       });
-      const tools = el('span', { className: 'char-file-tools' }, playFile, tickAll, untickAll);
+      const tools = el('span', { className: 'char-file-tools' }, playFile, tickToggle);
       details.append(el('summary', {}, label, tools));
       const fill = () => {
         if (details.dataset.filled) return;
@@ -2271,10 +2314,11 @@ function renderCharacter() {
       };
       details.addEventListener('toggle', () => {
         if (details.open) { charUi.open.add(id); fill(); } else charUi.open.delete(id);
+        details.dispatchEvent(new Event('episodes-toggled', { bubbles: true }));  // Expand / Collapse all follow
       });
       if (details.open) fill();
-      box.append(details);
-    });
+      target.append(details);
+    }
     panel.append(box);
   };
   section('Confirmed', confirmed, false);
@@ -2317,6 +2361,33 @@ function renderCharacter() {
     if (list && scrolls.has(d.dataset.id)) list.scrollTop = scrolls.get(d.dataset.id);
   });
   if (scrolls.size) window.scrollTo(0, pageY);
+}
+
+/** The season of a file from its name or folder ("Season 2/...", "S02E05"), or null. */
+function seasonOf(file) {
+  const m = /season[\s._-]*(\d{1,2})/i.exec(file) || /\bS(\d{1,2})[\s._-]?E\d{1,3}/i.exec(file);
+  return m ? Number(m[1]) : null;
+}
+
+/** A button that opens or closes a group of episodes: "Expand all" while any is closed. */
+function expandToggle(container, what) {
+  const getDetails = () => [...container.querySelectorAll('details.char-file')];
+  const b = el('button', { type: 'button', className: 'btn btn--ghost expand-toggle' });
+  const update = () => {
+    const anyClosed = getDetails().some((d) => !d.open);
+    b.textContent = anyClosed ? 'Expand all' : 'Collapse all';
+    b.title = `${anyClosed ? 'Open' : 'Close'} all these ${what}`;
+  };
+  b.addEventListener('click', () => {
+    const list = getDetails();
+    const open = list.some((d) => !d.open);
+    list.forEach((d) => { d.open = open; });
+    update();
+  });
+  // Follow episodes opened or closed one by one
+  container.addEventListener('episodes-toggled', update);
+  queueMicrotask(update);  // once the episodes are in
+  return b;
 }
 
 /** "S01E03.mkv · 12 clips · 5 saved · 4 ticked" */

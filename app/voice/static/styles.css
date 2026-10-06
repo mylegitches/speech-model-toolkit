@@ -512,3 +512,8 @@ body.trimming { cursor: progress; }
   border-radius: 8px; border: 3px solid currentColor; }
 .player-screen[data-swipe="keep"]::after { content: 'KEEP'; left: 1rem; color: var(--success); transform: rotate(-12deg); }
 .player-screen[data-swipe="reject"]::after { content: 'REJECT'; right: 1rem; color: var(--danger); transform: rotate(12deg); }
+
+/* Character review: episodes grouped by season */
+.char-season { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.4rem; }
+.char-season-head { display: flex; align-items: center; gap: 0.6rem; padding: 0.3rem 0.1rem; border-bottom: 1px solid var(--border); }
+.char-season-head .btn { margin-left: auto; padding: 0.2rem 0.6rem; min-height: 0; font-size: 0.8rem; }
