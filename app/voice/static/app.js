@@ -3568,7 +3568,7 @@ const REVIEW = {
   ],
   toggleLabel: '✓ In / out',
   toggleTitle: 'Take this clip in, or leave it out; a saved clip comes back out of the dataset (D)',
-  keys: 'Space pause/play · ↑ ↓ previous/next · R or ← replay · [ ] trim ¼ s off the start / end · D take in / leave out · F fix the words · Esc close',
+  keys: 'Space pause/play · ↑ ↓ previous/next · R or ← replay · [ ] trim ¼ s off the start / end · D take in / leave out · F fix the words · Esc close · phone: swipe right keep, left reject, up/down next/previous, tap to fix the words',
   row: (clip) => document.querySelector(`#character-panel .clip[data-key="${CSS.escape(clipKey(clip))}"]`),
   text: (clip) => charUi.text.get(clipKey(clip)) ?? clip.text,
   // (start/end in the address: a trimmed clip is never played from an old copy)
@@ -3597,6 +3597,32 @@ const REVIEW = {
     const key = clipKey(clip);
     if (value && value !== clip.text) charUi.text.set(key, value); else charUi.text.delete(key);
     this.row(clip)?.rerender?.();
+  },
+  /** Swipe: keep (into the dataset now, with the words as shown) or reject (out of it now). */
+  async decide(clip, keep) {
+    const key = clipKey(clip);
+    try {
+      if (keep && !clip.saved) {
+        const text = this.text(clip);
+        const result = await postJson(voiceUrl('/clips/save'), { clips: [{ take: clip.take, index: clip.index, text }] });
+        updateRecorded(result.recorded);
+        clip.saved = true;
+        clip.text = text;
+        charUi.text.delete(key);
+        loadTakes();
+      } else if (!keep && clip.saved) {
+        const result = await postJson(voiceUrl('/clips/unsave'), { clips: [{ take: clip.take, index: clip.index }] });
+        updateRecorded(result.recorded);
+        clip.saved = false;
+        loadTakes();
+      }
+    } catch (err) {
+      SMT.showError(err.message);
+      return false;
+    }
+    charUi.keep.set(key, keep);
+    this.row(clip)?.rerender?.();
+    return true;
   },
 };
 
@@ -3650,18 +3676,39 @@ function buildPlayer() {
   const close = button('✕', 'Close (Esc)', () => stopPlayer(), 'player-close');
   const keys = el('div', { className: 'player-keys hint' });
   box.append(close, screen, bar, controls, keys, audio);
-  // Touch: tap the picture to pause/play, swipe left for the next clip, right for the previous one
+  // Touch: tap the clip to fix its words (it pauses; Enter keeps the change and plays on).
+  // Review player: swipe right = keep (into the dataset), left = reject, like other apps;
+  // up/down = next/previous without deciding. Dataset player: left/right = next/previous.
   let touch = null;
+  const editing = () => !screen.querySelector('.player-edit.hidden');
   screen.addEventListener('touchstart', (e) => {
-    touch = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+    touch = e.touches.length === 1 && !editing() ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
   }, { passive: true });
+  screen.addEventListener('touchmove', (e) => {
+    if (!touch || player.mode !== REVIEW) return;
+    const dx = e.touches[0].clientX - touch.x;
+    const dy = e.touches[0].clientY - touch.y;
+    if (Math.abs(dx) < Math.abs(dy)) return;
+    // The card follows the finger and shows what letting go will do
+    screen.style.transform = `translateX(${dx * 0.6}px) rotate(${dx / 40}deg)`;
+    screen.dataset.swipe = dx > 40 ? 'keep' : dx < -40 ? 'reject' : '';
+  }, { passive: true });
+  const settle = () => { screen.style.transform = ''; screen.dataset.swipe = ''; };
+  screen.addEventListener('touchcancel', () => { touch = null; settle(); });
   screen.addEventListener('touchend', (e) => {
-    if (!touch || e.target.closest('.player-edit') || !screen.querySelector('.player-edit.hidden')) return;
+    if (!touch || editing()) { settle(); return; }
     const dx = e.changedTouches[0].clientX - touch.x;
     const dy = e.changedTouches[0].clientY - touch.y;
     touch = null;
-    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) playerGo(player.index + (dx < 0 ? 1 : -1));
-    else if (Math.abs(dx) < 10 && Math.abs(dy) < 10) { e.preventDefault(); playerToggle(); }
+    const sideways = Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5;
+    const upDown = Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx) * 1.5;
+    if (player.mode === REVIEW && sideways) playerSwipe(dx > 0);
+    else if (player.mode === REVIEW && upDown) { settle(); playerGo(player.index + (dy < 0 ? 1 : -1)); }
+    else if (sideways) { settle(); playerGo(player.index + (dx < 0 ? 1 : -1)); }
+    else {
+      settle();
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) { e.preventDefault(); playerEdit(); }  // tap: fix the words (pauses)
+    }
   });
   const filter = controls.querySelector('.player-filter');
   filter.addEventListener('change', () => {
@@ -3864,6 +3911,26 @@ function playerReplay() {
   player.playing = true;
   player.box.querySelector('.player-play').textContent = '⏸';
   player.audio.play().catch(() => {});
+}
+
+/** Review player swipe: keep or reject the clip, show it, then on to the next one. */
+async function playerSwipe(keep) {
+  const entry = player.queue[player.index];
+  const screen = player.box.querySelector('.player-screen');
+  if (!entry || player.deciding) { screen.style.transform = ''; screen.dataset.swipe = ''; return; }
+  player.deciding = true;
+  screen.dataset.swipe = keep ? 'keep' : 'reject';
+  screen.style.transform = `translateX(${keep ? 120 : -120}%) rotate(${keep ? 12 : -12}deg)`;
+  const ok = await REVIEW.decide(entry.clip, keep);
+  playerBadge();
+  setTimeout(() => {
+    screen.style.transition = 'none';
+    screen.style.transform = '';
+    screen.dataset.swipe = '';
+    requestAnimationFrame(() => { screen.style.transition = ''; });
+    player.deciding = false;
+    if (ok) playerGo(player.index + 1);
+  }, 220);
 }
 
 async function playerMark() {
