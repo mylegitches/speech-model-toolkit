@@ -108,7 +108,7 @@ Use recordings you already have: voice memos, podcasts, interviews, movies or a 
 2. Choose **Background noise**. For videos it switches to *Remove* automatically (it also removes music and effects).
 3. If several people talk in it, tick **Several people are talking**. This is ticked automatically for videos.
 4. Click **Import** (or **Import N files**). The files upload one after another with a percentage, then are processed one at a time; the others show *Waiting for the other files to finish…*.
-5. **If the file has several audio tracks** (for example English, Spanish and a director's commentary), you're asked which one to use. The one in the voice's language is preselected.
+5. **If the file has several audio tracks**, the only one in the voice's language is used without asking (e.g. English + Portuguese on a DVD). You're only asked when that isn't obvious: two tracks in the voice's language (say English and an English director's commentary), or none. The best guess is preselected, and with several files waiting, **Use it for all N files** picks a language for all of them at once (each gets its best track in that language, not a commentary).
    - For surround sound (5.1/7.1), **Dialogue only** is on by default: it uses just the center channel, where movie dialogue is, leaving most music and effects out.
 6. **If several people talk**, the review starts with **Who do you want?**: one card per person, with how long they talk, three ▶ samples and a quote.
    - Play the samples and click **Use this voice** on the right person.

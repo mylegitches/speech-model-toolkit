@@ -342,6 +342,28 @@ def recommended_track(tracks: List[Dict[str, Any]], voice_language: str) -> int:
     return max(tracks, key=score)["index"]
 
 
+def track_language(track: Dict[str, Any]) -> str:
+    """A track's language as a voice language prefix ("eng" -> "en"); "" when untagged."""
+    code = (track.get("language") or "").lower()
+    return _LANGUAGE_CODES.get(code, code[:2] if code not in ("", "und") else "")
+
+
+def obvious_track(tracks: List[Dict[str, Any]], voice_language: str) -> Optional[int]:
+    """The only track in the voice's language, if there's exactly one: no need to ask.
+    None if there are several (e.g. a commentary in English too) or none."""
+    want = voice_language.split("-")[0].lower()
+    matching = [t for t in tracks if track_language(t) == want]
+    return matching[0]["index"] if len(matching) == 1 else None
+
+
+def best_track_in(tracks: List[Dict[str, Any]], language: str) -> Optional[int]:
+    """The best track in a language (not a commentary, the default one, most channels)."""
+    matching = [t for t in tracks if track_language(t) == language]
+    if not matching:
+        return None
+    return max(matching, key=lambda t: ("comment" not in t["title"].lower(), t["default"], t["channels"]))["index"]
+
+
 class _Word:
     __slots__ = ("start", "end", "word", "segment_start")
 
@@ -480,8 +502,13 @@ def start(voice: Voice, source: Path, denoise: Any = "light", diarize: bool = Fa
     _LOGGER.info("Freeform take %s/%s uploaded: %s (%.1f MB), %d audio track(s)",
                  voice.name, take_id, source.name, size / 2**20, len(tracks))
     if len(tracks) > 1:
-        _write(take_dir, take)  # wait for the track choice
-        return _public(take_id, take)
+        obvious = obvious_track(tracks, voice.language)
+        if obvious is None:
+            _write(take_dir, take)  # wait for the track choice
+            return _public(take_id, take)
+        # One track in the voice's language: that's the one, no need to ask
+        take.update(track=obvious, dialogue=tracks[obvious]["surround"])
+        _LOGGER.info("Take %s: audio track %d picked (the only one in %s)", take_id, obvious, voice.language)
     return _begin(voice, take_dir, take)
 
 
@@ -514,6 +541,45 @@ def choose_track(voice: Voice, take_id: str, track: int, dialogue: bool) -> Dict
     take["track"] = int(track)
     take["dialogue"] = bool(dialogue) and tracks[int(track)]["surround"]
     return _begin(voice, take_dir, take)
+
+
+def choose_tracks_for_all(voice: Voice, language: str) -> Dict[str, Any]:
+    """Every file waiting for a track choice: its best track in `language`. Files without
+    a track in that language keep waiting."""
+    started, left = 0, 0
+    for take_dir in sorted(_takes_dir(voice).iterdir()) if _takes_dir(voice).is_dir() else []:
+        if not (take_dir / "take.json").is_file() or take_dir.name in _live:
+            continue
+        take = _read(take_dir)
+        if take.get("state") != "choose_track":
+            continue
+        track = best_track_in(take.get("tracks") or [], language)
+        if track is None:
+            left += 1
+            continue
+        choose_track(voice, take_dir.name, track, take["tracks"][track]["surround"])
+        started += 1
+    _LOGGER.info("Voice %s: audio track in %s picked for %d files (%d without one)", voice.name, language, started, left)
+    return {"started": started, "left": left}
+
+
+def pick_obvious_tracks(voice: Voice) -> int:
+    """Files that were left waiting for a track choice that is obvious (one track in the
+    voice's language): start them. For files added before this rule existed."""
+    started = 0
+    for take_dir in sorted(_takes_dir(voice).iterdir()) if _takes_dir(voice).is_dir() else []:
+        if not (take_dir / "take.json").is_file() or take_dir.name in _live:
+            continue
+        take = _read(take_dir)
+        if take.get("state") != "choose_track":
+            continue
+        track = obvious_track(take.get("tracks") or [], voice.language)
+        if track is not None:
+            choose_track(voice, take_dir.name, track, take["tracks"][track]["surround"])
+            started += 1
+    if started:
+        _LOGGER.info("Voice %s: %d waiting files had an obvious audio track: started", voice.name, started)
+    return started
 
 
 def _begin(voice: Voice, take_dir: Path, take: Dict[str, Any]) -> Dict[str, Any]:

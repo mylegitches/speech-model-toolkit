@@ -2524,6 +2524,7 @@ async function loadTakes() {
     if (existing) existing.replaceWith(node); else box.append(node);
     renderedTakes[take.id] = takeKey(take);
   });
+  renderTracksForAll(takes);
   applyTakeFilter();
   renderClone();
   if (recordMode === 'prompts' && takes.some((t) => ['done', 'choose_track'].includes(t.state) && !isCloneTake(t))) {
@@ -2539,6 +2540,45 @@ async function loadTakes() {
     takesTimer = setTimeout(loadTakes, failed ? 15000 : 4000);
   }
   updatePending(takes);
+}
+
+const TRACK_LANGUAGE_NAMES = new Intl.DisplayNames(['en'], { type: 'language' });
+const trackLang = (t) => {
+  const code = (t.language || '').toLowerCase();
+  const two = { eng: 'en', spa: 'es', fra: 'fr', fre: 'fr', deu: 'de', ger: 'de', ita: 'it', por: 'pt', jpn: 'ja',
+    zho: 'zh', chi: 'zh', rus: 'ru', kor: 'ko', nld: 'nl', dut: 'nl', pol: 'pl', swe: 'sv', tur: 'tr' }[code];
+  return two || (code && code !== 'und' ? code.slice(0, 2) : '');
+};
+
+/** Several files waiting for an audio track: one choice for all of them. */
+function renderTracksForAll(takes) {
+  const box = $('#free-takes');
+  box.querySelector('.tracks-for-all')?.remove();
+  const waiting = takes.filter((t) => t.state === 'choose_track');
+  if (waiting.length < 2) return;
+  const langs = new Map();
+  waiting.forEach((t) => new Set((t.tracks || []).map(trackLang).filter(Boolean)).forEach((l) => langs.set(l, (langs.get(l) || 0) + 1)));
+  if (!langs.size) return;
+  const want = (voice.language || '').split('-')[0].toLowerCase();
+  const select = el('select', {}, ...[...langs.entries()]
+    .sort((a, b) => (b[0] === want) - (a[0] === want) || b[1] - a[1])
+    .map(([l, n]) => new Option(`${TRACK_LANGUAGE_NAMES.of(l) || l}${n < waiting.length ? ` (${n} of ${waiting.length})` : ''}`, l)));
+  const go = el('button', { type: 'button', className: 'btn btn--primary', textContent: `Use it for all ${waiting.length} files` });
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    try {
+      const result = await postJson(voiceUrl('/freeform/tracks'), { language: select.value });
+      $('#clone-status').textContent = $('#free-upload-status').textContent = result.left
+        ? `Started ${result.started} files; ${result.left} have no ${TRACK_LANGUAGE_NAMES.of(select.value)} track and still need a choice.`
+        : `Started all ${result.started} files.`;
+    } catch (err) {
+      SMT.showError(err.message);
+    }
+    loadTakes();
+  });
+  box.prepend(el('div', { className: 'banner tracks-for-all' },
+    el('span', { textContent: `${waiting.length} files need an audio track choice. Pick a language for all of them (each gets its best track in it, not a commentary): ` }),
+    select, go));
 }
 
 // Clips from recorded/imported takes only join the dataset once saved:

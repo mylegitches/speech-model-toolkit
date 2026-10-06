@@ -57,6 +57,12 @@ trainer = TrainingManager(python=find_train_python())
 
 async def startup() -> None:
     await trainer.detect_device()
+    # Files left waiting for an audio track choice that is obvious: go ahead with them
+    for voice in store.list():
+        try:
+            freeform.pick_obvious_tracks(voice)
+        except Exception:  # noqa: BLE001 - never stop the app starting
+            _LOGGER.exception("Couldn't start the waiting files of %s", voice.name)
 
 
 @asynccontextmanager
@@ -615,6 +621,16 @@ async def api_freeform_retry(name: str, take_id: str) -> Dict[str, Any]:
 class TrackRequest(BaseModel):
     track: int
     dialogue: bool = True
+
+
+class TracksForAll(BaseModel):
+    language: str  # "en", "es"…: each waiting file gets its best track in it
+
+
+@app.post("/api/voices/{name}/freeform/tracks")
+async def api_tracks_for_all(name: str, body: TracksForAll) -> Dict[str, Any]:
+    """One choice for every file waiting for an audio track."""
+    return freeform.choose_tracks_for_all(store.get(name), body.language.lower())
 
 
 @app.post("/api/voices/{name}/freeform/{take_id}/track")

@@ -517,3 +517,7 @@ body.trimming { cursor: progress; }
 .char-season { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.4rem; }
 .char-season-head { display: flex; align-items: center; gap: 0.6rem; padding: 0.3rem 0.1rem; border-bottom: 1px solid var(--border); }
 .char-season-head .btn { margin-left: auto; padding: 0.2rem 0.6rem; min-height: 0; font-size: 0.8rem; }
+
+/* One audio track choice for all waiting files */
+.tracks-for-all { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem; }
+.tracks-for-all select { width: auto; }
