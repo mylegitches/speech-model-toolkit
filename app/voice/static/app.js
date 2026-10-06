@@ -2072,8 +2072,8 @@ function renderClone() {
   box.innerHTML = '';
   const chars = peopleUi.characters || [];
   const current = chars.find((c) => c.name === charUi.name);
-  if (current && current.saved > 0 && !cloneUi.showChars) {
-    // Working on one character (some clips saved): the others fold away
+  if (current && !cloneUi.showChars) {
+    // A character is picked: the others fold away (Change character brings them back)
     const change = el('button', { type: 'button', className: 'btn btn--secondary', textContent: 'Change character' });
     change.addEventListener('click', () => { cloneUi.showChars = true; renderClone(); });
     box.append(el('div', { className: 'character-current' },
@@ -2083,7 +2083,7 @@ function renderClone() {
       change));
   } else if (chars.length) {
     box.append(characterList(chars));
-    if (current && current.saved > 0) {
+    if (current) {
       const hide = el('button', { type: 'button', className: 'btn btn--ghost', textContent: `Keep ${current.name}` });
       hide.addEventListener('click', () => { cloneUi.showChars = false; renderClone(); });
       box.querySelector('.character-list').append(hide);
@@ -2109,7 +2109,7 @@ function characterList(chars) {
         + (c.saved ? ` · ${c.saved} already saved` : ''),
     });
     chip.addEventListener('click', () => {
-      cloneUi.showChars = false;  // picked: the list folds away again (once there are saves)
+      cloneUi.showChars = false;  // picked: the list folds away
       if (charUi.name === c.name) closeCharacter(); else openCharacter(c.name);
     });
     box.append(chip);
