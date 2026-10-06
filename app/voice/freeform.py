@@ -785,11 +785,11 @@ MIN_TRIMMED = 0.4  # seconds a trimmed clip keeps at least
 
 
 def trim_clip(voice: Voice, take_id: str, index: int, front: float = 0.0, back: float = 0.0,
-              reset: bool = False, text: Optional[str] = None) -> Dict[str, Any]:
-    """Cut a bit off the start and/or end of a clip (a laugh, another voice), or undo
-    all trims. Words cut off go from the text (`text`: the words as shown in the review,
-    with any corrections). A clip already in the dataset gets its saved audio and text
-    redone too."""
+              reset: bool = False, text: Optional[str] = None, undo: bool = False) -> Dict[str, Any]:
+    """Cut a bit off the start and/or end of a clip (a laugh, another voice); `undo` takes
+    back the last trim, `reset` all of them. Words cut off go from the text (`text`: the
+    words as shown in the review, with any corrections); undoing brings them back. A clip
+    already in the dataset gets its saved audio and text redone too."""
     take_dir = _take_dir(voice, take_id)
     if take_id in _live:
         raise RuntimeError("That file is still being processed; wait for it to finish")
@@ -798,26 +798,27 @@ def trim_clip(voice: Voice, take_id: str, index: int, front: float = 0.0, back: 
     if not 0 <= index < len(segments):
         raise KeyError(f"No clip {index}")
     seg = segments[index]
-    original = seg.get("original") or [seg["start"], seg["end"]]
+    history = seg.get("trims") or []  # the clip before each trim: {start, end, text}
     current = " ".join((text if text is not None else (seg.get("savedText") or seg["text"])).split())
-    if reset:
-        start, end = original
-        words = seg.get("originalText") or current
+    if reset or undo:
+        if not history:
+            raise ValueError("This clip isn't trimmed")
+        before = history[0] if reset else history[-1]
+        del history[0 if reset else -1:]
+        start, end, words = before["start"], before["end"], before["text"]
     else:
         start = seg["start"] + max(0.0, float(front))
         end = seg["end"] - max(0.0, float(back))
         if end - start < MIN_TRIMMED:
             raise ValueError(f"That would leave less than {MIN_TRIMMED:g} s of the clip")
+        history.append({"start": seg["start"], "end": seg["end"], "text": current})
         words = current
-    if "originalText" not in seg and not reset:
-        seg["originalText"] = current
     seg["start"], seg["end"] = round(start, 3), round(end, 3)
-    if [seg["start"], seg["end"]] == [round(original[0], 3), round(original[1], 3)]:
-        seg.pop("original", None)
-        seg.pop("originalText", None)
+    if history:
+        seg["trims"] = history
     else:
-        seg["original"] = original
-    if not reset and (front or back):
+        seg.pop("trims", None)
+    if not (reset or undo) and (front or back):
         try:
             words = words_still_heard(words, _hear(voice, take, take_id, index), front > 0, back > 0)
         except Exception as err:  # noqa: BLE001 - the trim still counts; the words stay
@@ -830,8 +831,8 @@ def trim_clip(voice: Voice, take_id: str, index: int, front: float = 0.0, back: 
     if seg.get("saved"):
         voice.save_recording(GROUP, f"{take_id}_{index:04d}", words, clip_wav(voice, take_id, index), ".wav")
     _LOGGER.info("Voice %s: clip %s/%d %s (%.2f-%.2f s)", voice.name, take_id, index,
-                 "trims undone" if reset else "trimmed", seg["start"], seg["end"])
-    return {"start": seg["start"], "end": seg["end"], "trimmed": "original" in seg, "text": words}
+                 "trims undone" if reset else "last trim undone" if undo else "trimmed", seg["start"], seg["end"])
+    return {"start": seg["start"], "end": seg["end"], "trimmed": bool(history), "trims": len(history), "text": words}
 
 
 def set_saved_text(voice: Voice, take_id: str, index: int, text: str) -> str:

@@ -2484,7 +2484,10 @@ function characterClipRow(clip, ticked, changed) {
   const trims = el('span', { className: 'clip-trims' },
     trimBtn('✂ start', 'Trim ¼ second off the start (click again for more)', { front: TRIM_STEP }),
     trimBtn('end ✂', 'Trim ¼ second off the end (click again for more)', { back: TRIM_STEP }));
-  if (clip.trimmed) trims.append(trimBtn('↺', 'Undo the trims', { reset: true }));
+  if (clip.trimmed) {
+    trims.append(trimBtn('↶', 'Undo the last trim (its words come back)', { undo: true }));
+    if (clip.trims > 1) trims.append(trimBtn('↺', `Undo all ${clip.trims} trims: the clip as it was`, { reset: true }));
+  }
   row.append(keep, play, text, trims, status);
   const outer = clip.reason
     ? el('div', { className: 'clip-with-reason' }, row, el('small', { className: 'hint', textContent: clip.reason }))
@@ -3679,7 +3682,7 @@ const REVIEW = {
   ],
   toggleLabel: '✓ In / out',
   toggleTitle: 'Take this clip in, or leave it out; a saved clip comes back out of the dataset (D)',
-  keys: 'Space pause/play · ↑ ↓ previous/next · R or ← replay · [ ] trim ¼ s off the start / end · D take in / leave out · F fix the words · Esc close · phone: swipe right keep, left reject, up/down next/previous, tap to fix the words',
+  keys: 'Space pause/play · ↑ ↓ previous/next · R or ← replay · [ ] trim ¼ s off the start / end, U undo the last trim · D take in / leave out · F fix the words · Esc close · phone: swipe right keep, left reject, up/down next/previous, tap to fix the words',
   row: (clip) => document.querySelector(`#character-panel .clip[data-key="${CSS.escape(clipKey(clip))}"]`),
   text: (clip) => charUi.text.get(clipKey(clip)) ?? clip.text,
   // (start/end in the address: a trimmed clip is never played from an old copy)
@@ -3782,8 +3785,10 @@ function buildPlayer() {
       button('↺', 'Play this clip again (R or ←)', () => playerReplay()),
       button('', '', () => playerMark(), 'player-toggle player-wide'),
       button('✎ Fix', 'Correct the words: pauses; Enter keeps the change and plays on, Esc cancels (F)', () => playerEdit(), 'player-wide'),
-      button('✂ start', 'Trim ¼ second off the start of this clip ([)', () => playerTrim('front'), 'player-wide player-trim'),
-      button('end ✂', 'Trim ¼ second off the end of this clip (])', () => playerTrim('back'), 'player-wide player-trim')));
+      button('✂ start', 'Trim ¼ second off the start of this clip ([)', () => playerTrim('front'), 'player-trim'),
+      button('↶', 'Undo the last trim of this clip (U)', () => playerTrim('undo'), 'player-trim'),
+      button('↺', 'Undo all trims of this clip: as it was', () => playerTrim('reset'), 'player-trim'),
+      button('end ✂', 'Trim ¼ second off the end of this clip (])', () => playerTrim('back'), 'player-trim')));
   const close = button('✕', 'Close (Esc)', () => stopPlayer(), 'player-close');
   const keys = el('div', { className: 'player-keys hint' });
   box.append(close, screen, bar, controls, keys, audio);
@@ -4010,7 +4015,9 @@ async function playerTrim(side) {
   clearTimeout(player.timer);
   player.audio.pause();
   const row = document.querySelector(`.clip[data-key="${CSS.escape(clipKey(clip))}"]`);
-  const ok = await trimClip(clip, { [side]: TRIM_STEP }, () => row && row.rerender && row.rerender(), false);
+  if ((side === 'undo' || side === 'reset') && !clip.trimmed) { player.trimming = false; return; }
+  const body = side === 'undo' ? { undo: true } : side === 'reset' ? { reset: true } : { [side]: TRIM_STEP };
+  const ok = await trimClip(clip, body, () => row && row.rerender && row.rerender(), false);
   player.trimming = false;
   if (ok) playerGo(player.index);  // the trimmed clip and its words, from the start
 }
@@ -4086,6 +4093,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); playerEdit(); }
   else if (e.key === 'r' || e.key === 'R' || e.key === 'ArrowLeft') { e.preventDefault(); playerReplay(); }
   else if ((e.key === '[' || e.key === ']') && player.mode === REVIEW) { e.preventDefault(); playerTrim(e.key === '[' ? 'front' : 'back'); }
+  else if ((e.key === 'u' || e.key === 'U') && player.mode === REVIEW) { e.preventDefault(); playerTrim('undo'); }
   else if (e.key === 'Escape') { e.preventDefault(); stopPlayer(); }
 });
 

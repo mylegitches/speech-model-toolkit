@@ -43,7 +43,21 @@ def test_trim_and_undo(take):
     out = freeform.trim_clip(voice, "t1", 0, reset=True)
     assert (out["start"], out["end"], out["trimmed"], out["text"]) == (1.0, 3.0, False, "Yeah, I know what you did.")
     seg = json.loads((take_dir / "take.json").read_text())["segments"][0]
-    assert "original" not in seg and "originalText" not in seg
+    assert "trims" not in seg
+
+
+def test_undo_the_last_trim_one_step_at_a_time(take, monkeypatch):
+    voice, _ = take
+    freeform.trim_clip(voice, "t1", 0, front=0.25)            # "Yeah," goes
+    monkeypatch.setattr(freeform, "_hear", lambda *a: "I know what you")
+    out = freeform.trim_clip(voice, "t1", 0, back=0.25)       # "did." goes too: too much
+    assert (out["end"], out["trims"], out["text"]) == (2.75, 2, "I know what you")
+    out = freeform.trim_clip(voice, "t1", 0, undo=True)       # just the last one back
+    assert (out["start"], out["end"], out["trims"], out["text"]) == (1.25, 3.0, 1, "I know what you did.")
+    out = freeform.trim_clip(voice, "t1", 0, undo=True)       # and the first
+    assert (out["start"], out["end"], out["trimmed"], out["text"]) == (1.0, 3.0, False, "Yeah, I know what you did.")
+    with pytest.raises(ValueError):                           # nothing left to undo
+        freeform.trim_clip(voice, "t1", 0, undo=True)
 
 
 def test_trim_keeps_some_of_the_clip(take):
