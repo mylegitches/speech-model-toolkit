@@ -77,3 +77,34 @@ def test_trimming_a_saved_clip_redoes_it_in_the_dataset(take, monkeypatch):
     assert written == {"stem": "t1_0000", "text": "I know what you did."}
     seg = json.loads((take_dir / "take.json").read_text())["segments"][0]
     assert seg["savedText"] == "I know what you did." and seg["start"] == 1.25
+
+
+def _audio(take_dir, seconds=6.0, rate=22050):
+    import wave
+    import numpy as np
+    t = np.arange(int(seconds * rate)) / rate
+    pcm = (0.3 * np.sin(2 * np.pi * 200 * t) * (t > 1.0) * (t < 3.0) * 32767).astype(np.int16)
+    with wave.open(str(take_dir / "audio.wav"), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate); w.writeframes(pcm.tobytes())
+
+
+def test_waveform_view_around_the_clip(take):
+    voice, take_dir = take
+    _audio(take_dir)
+    view = freeform.clip_view(voice, "t1", 0, bins=100)
+    assert view["viewStart"] == 0.0 and 4.4 <= view["viewEnd"] <= 4.5   # 1.5 s either side, within the file
+    assert len(view["peaks"]) == 100 and max(view["peaks"]) == 1.0
+    assert (view["start"], view["end"], view["firstStart"], view["firstEnd"]) == (1.0, 3.0, 1.0, 3.0)
+
+
+def test_drag_to_an_exact_cut_and_back_out_again(take, monkeypatch):
+    voice, take_dir = take
+    _audio(take_dir)
+    out = freeform.trim_clip(voice, "t1", 0, start=1.3, end=2.9)        # dragged in: "Yeah," goes
+    assert (out["start"], out["end"], out["text"]) == (1.3, 2.9, "I know what you did.")
+    monkeypatch.setattr(freeform, "_hear", lambda *a: "Yeah, I know what you did")
+    out = freeform.trim_clip(voice, "t1", 0, start=1.0, end=2.9)        # dragged back out
+    assert out["text"] == "Yeah, I know what you did."                  # the words of the first cut
+    out = freeform.trim_clip(voice, "t1", 0, start=-5, end=99)          # never past the margin
+    assert (out["start"], out["end"]) == (0.0, 4.5)
+    assert freeform.trim_clip(voice, "t1", 0, reset=True)["start"] == 1.0

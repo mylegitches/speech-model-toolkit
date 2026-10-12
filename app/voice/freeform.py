@@ -32,7 +32,7 @@ import sys
 import time
 import wave
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -784,8 +784,45 @@ def _hear(voice: Voice, take: Dict[str, Any], take_id: str, index: int) -> str:
 MIN_TRIMMED = 0.4  # seconds a trimmed clip keeps at least
 
 
+VIEW_MARGIN = 1.5  # seconds of sound shown (and reachable by dragging) around a clip's first cut
+
+
+def _clip_bounds(take_dir: Path, seg: Dict[str, Any]) -> Tuple[float, float]:
+    """How far a clip may be dragged: its first cut plus VIEW_MARGIN, within the file."""
+    first = (seg.get("trims") or [{"start": seg["start"], "end": seg["end"]}])[0]
+    try:
+        with wave.open(str(take_dir / "audio.wav"), "rb") as src:
+            duration = src.getnframes() / src.getframerate()
+    except (OSError, wave.Error, EOFError):
+        duration = first["end"] + VIEW_MARGIN
+    return max(0.0, first["start"] - VIEW_MARGIN), min(duration, first["end"] + VIEW_MARGIN)
+
+
+def clip_view(voice: Voice, take_id: str, index: int, bins: int = 400) -> Dict[str, Any]:
+    """The waveform around a clip for the crop handles: peak level per bin (0-1) from a
+    little before to a little after it, with the current and first cut."""
+    take_dir = _take_dir(voice, take_id)
+    seg = _read(take_dir)["segments"][index]
+    lo, hi = _clip_bounds(take_dir, seg)
+    with wave.open(str(take_dir / "audio.wav"), "rb") as src:
+        rate = src.getframerate()
+        src.setpos(min(int(lo * rate), src.getnframes()))
+        audio = np.frombuffer(src.readframes(int((hi - lo) * rate)), dtype=np.int16).astype(np.float32) / 32768.0
+    n = max(1, len(audio) // bins)
+    peaks = np.abs(audio[: n * bins].reshape(-1, n)).max(axis=1) if len(audio) >= bins else np.abs(audio)
+    top = float(np.percentile(peaks, 99)) or 1.0
+    first = (seg.get("trims") or [{"start": seg["start"], "end": seg["end"]}])[0]
+    return {
+        "viewStart": round(lo, 3), "viewEnd": round(lo + len(peaks) * n / rate, 3),
+        "start": seg["start"], "end": seg["end"],
+        "firstStart": first["start"], "firstEnd": first["end"],
+        "peaks": [round(float(min(1.0, v / top)), 3) for v in peaks],
+    }
+
+
 def trim_clip(voice: Voice, take_id: str, index: int, front: float = 0.0, back: float = 0.0,
-              reset: bool = False, text: Optional[str] = None, undo: bool = False) -> Dict[str, Any]:
+              reset: bool = False, text: Optional[str] = None, undo: bool = False,
+              start: Optional[float] = None, end: Optional[float] = None) -> Dict[str, Any]:
     """Cut a bit off the start and/or end of a clip (a laugh, another voice); `undo` takes
     back the last trim, `reset` all of them. Words cut off go from the text (`text`: the
     words as shown in the review, with any corrections); undoing brings them back. A clip
@@ -800,12 +837,27 @@ def trim_clip(voice: Voice, take_id: str, index: int, front: float = 0.0, back: 
     seg = segments[index]
     history = seg.get("trims") or []  # the clip before each trim: {start, end, text}
     current = " ".join((text if text is not None else (seg.get("savedText") or seg["text"])).split())
+    hear_front = hear_back = False
     if reset or undo:
         if not history:
             raise ValueError("This clip isn't trimmed")
         before = history[0] if reset else history[-1]
         del history[0 if reset else -1:]
         start, end, words = before["start"], before["end"], before["text"]
+    elif start is not None and end is not None:
+        # Dragged handles: an exact cut, as far as a little past the first one
+        lo, hi = _clip_bounds(take_dir, seg)
+        start, end = max(lo, float(start)), min(hi, float(end))
+        if end - start < MIN_TRIMMED:
+            raise ValueError(f"That would leave less than {MIN_TRIMMED:g} s of the clip")
+        first = history[0] if history else {"start": seg["start"], "end": seg["end"], "text": current}
+        history.append({"start": seg["start"], "end": seg["end"], "text": current})
+        if start >= seg["start"] - 0.01 and end <= seg["end"] + 0.01:
+            # only cut further: words go from the text as it is now (corrections kept)
+            words, hear_front, hear_back = current, start > seg["start"] + 0.01, end < seg["end"] - 0.01
+        else:
+            # opened up again: start from the words of the first cut
+            words, hear_front, hear_back = first["text"], start > first["start"] + 0.01, end < first["end"] - 0.01
     else:
         start = seg["start"] + max(0.0, float(front))
         end = seg["end"] - max(0.0, float(back))
@@ -813,14 +865,15 @@ def trim_clip(voice: Voice, take_id: str, index: int, front: float = 0.0, back: 
             raise ValueError(f"That would leave less than {MIN_TRIMMED:g} s of the clip")
         history.append({"start": seg["start"], "end": seg["end"], "text": current})
         words = current
+        hear_front, hear_back = front > 0, back > 0
     seg["start"], seg["end"] = round(start, 3), round(end, 3)
     if history:
         seg["trims"] = history
     else:
         seg.pop("trims", None)
-    if not (reset or undo) and (front or back):
+    if hear_front or hear_back:
         try:
-            words = words_still_heard(words, _hear(voice, take, take_id, index), front > 0, back > 0)
+            words = words_still_heard(words, _hear(voice, take, take_id, index), hear_front, hear_back)
         except Exception as err:  # noqa: BLE001 - the trim still counts; the words stay
             _LOGGER.warning("Couldn't re-check the words of %s/%d after a trim: %s", take_id, index, err)
     if seg.get("saved"):

@@ -236,13 +236,16 @@ class TrimRequest(BaseModel):
     reset: bool = False  # undo all trims
     undo: bool = False   # undo the last trim
     text: Optional[str] = None  # the words as shown in the review (with corrections)
+    start: Optional[float] = None  # an exact cut (dragged handles): start and end, in the file
+    end: Optional[float] = None
 
 
 @app.post("/api/voices/{name}/clips/trim")
 async def api_trim_clip(name: str, body: TrimRequest) -> Dict[str, Any]:
     """Trim a clip in the review (and in the dataset, when it's saved)."""
     return await asyncio.to_thread(freeform.trim_clip, store.get(name), body.take, body.index,
-                                   body.front, body.back, body.reset, body.text, body.undo)
+                                   body.front, body.back, body.reset, body.text, body.undo,
+                                   body.start, body.end)
 
 
 class CopyRequest(BaseModel):
@@ -647,6 +650,12 @@ class DenoiseRequest(BaseModel):
 @app.put("/api/voices/{name}/freeform/{take_id}")
 async def api_freeform_update(name: str, take_id: str, request: DenoiseRequest) -> Dict[str, Any]:
     return freeform.set_denoise(store.get(name), take_id, request.denoise)
+
+
+@app.get("/api/voices/{name}/freeform/{take_id}/clips/{index}/view")
+async def api_clip_view(name: str, take_id: str, index: int) -> Dict[str, Any]:
+    """The waveform around a clip, for dragging its start and end in the review player."""
+    return await asyncio.to_thread(freeform.clip_view, store.get(name), take_id, index)
 
 
 @app.get("/api/voices/{name}/freeform/{take_id}/clips/{index}.wav")

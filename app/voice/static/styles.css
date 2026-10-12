@@ -521,3 +521,11 @@ body.trimming { cursor: progress; }
 /* One audio track choice for all waiting files */
 .tracks-for-all { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem; }
 .tracks-for-all select { width: auto; }
+
+/* Review player: waveform with crop handles */
+.player-wave { width: 100%; margin: 1.6rem 0 0.4rem; }
+.player-wave canvas { display: block; width: 100%; height: 72px; cursor: ew-resize; touch-action: none; }
+@media (max-width: 640px), (pointer: coarse) and (max-height: 540px) {
+  .player-wave { margin-top: 0.4rem; }
+  .player-wave canvas { height: 84px; }
+}

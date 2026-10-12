@@ -3769,6 +3769,8 @@ function buildPlayer() {
   const screen = el('div', { className: 'player-screen' },
     el('div', { className: 'player-from' }),
     el('span', { className: 'player-badge hidden' }),
+    // Review player: the clip's waveform with a handle at each end of the cut, to drag
+    el('div', { className: 'player-wave hidden' }, el('canvas', { title: 'Drag the start or end of the clip; let go to apply (↶ undoes)' })),
     el('div', { className: 'player-subtitle' }),
     el('input', { type: 'text', className: 'player-edit hidden' }));
   const bar = el('div', { className: 'player-bar' }, el('div', { className: 'player-fill' }));
@@ -3798,7 +3800,8 @@ function buildPlayer() {
   let touch = null;
   const editing = () => !screen.querySelector('.player-edit.hidden');
   screen.addEventListener('touchstart', (e) => {
-    touch = e.touches.length === 1 && !editing() ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+    touch = e.touches.length === 1 && !editing() && !e.target.closest('.player-wave')
+      ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
   }, { passive: true });
   screen.addEventListener('touchmove', (e) => {
     if (!touch || player.mode !== REVIEW) return;
@@ -3858,6 +3861,7 @@ function buildPlayer() {
   edit.addEventListener('blur', () => playerSaveEdit());
   player.box = box;
   player.audio = audio;
+  setupWaveDrag();
 }
 
 /** Play clips [{clip, from}] one after another; mode: MANAGER or REVIEW. The Play choice
@@ -3984,6 +3988,7 @@ function playerGo(index) {
   showPlayerPos(index);
   playerBadge();
   player.audio.src = player.mode.audio(clip);
+  loadWave(clip);
   player.playing = true;
   play.textContent = '⏸';
   SMT.applyOutput(player.audio).then(() => player.audio.play()).catch(() => {});
@@ -4007,6 +4012,146 @@ function playerToggle(forcePlay) {
 }
 
 /** The current clip again, from the start (then carries on as usual). */
+// ---- Waveform with crop handles (review player) ----------------------------------
+
+const wave = { data: null, clip: null, drag: null, cut: null, raf: 0 };
+
+/** Fetch the waveform around the clip now playing and draw it (review player only). */
+async function loadWave(clip) {
+  const box = player.box.querySelector('.player-wave');
+  show(box, player.mode === REVIEW);
+  if (player.mode !== REVIEW) return;
+  wave.clip = clip;
+  wave.data = null;
+  wave.cut = { start: clip.start, end: clip.end };
+  drawWave();
+  try {
+    const data = await api(voiceUrl(`/freeform/${clip.take}/clips/${clip.index}/view`));
+    if (wave.clip !== clip) return;  // moved on meanwhile
+    wave.data = data;
+    wave.cut = { start: data.start, end: data.end };
+  } catch (err) {
+    wave.data = null;
+  }
+  drawWave();
+}
+
+function waveGeometry() {
+  const canvas = player.box.querySelector('.player-wave canvas');
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  const { viewStart, viewEnd } = wave.data || { viewStart: 0, viewEnd: 1 };
+  const x = (t) => ((t - viewStart) / (viewEnd - viewStart)) * w;
+  const t = (px) => viewStart + (px / w) * (viewEnd - viewStart);
+  return { canvas, w, h, x, t };
+}
+
+function drawWave() {
+  const { canvas, w, h, x } = waveGeometry();
+  if (!w) return;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  const g = canvas.getContext('2d');
+  g.scale(dpr, dpr);
+  g.clearRect(0, 0, w, h);
+  if (!wave.data) {
+    g.fillStyle = '#4b5563';
+    g.font = '12px sans-serif';
+    g.fillText('Loading the waveform…', 8, h / 2 + 4);
+    return;
+  }
+  const { peaks } = wave.data;
+  const { start, end } = wave.cut;
+  const bar = w / peaks.length;
+  peaks.forEach((p, i) => {
+    const px = i * bar;
+    const time = wave.data.viewStart + (i / peaks.length) * (wave.data.viewEnd - wave.data.viewStart);
+    const inside = time >= start && time <= end;
+    const height = Math.max(1, p * (h - 6));
+    g.fillStyle = inside ? '#22c55e' : '#374151';
+    g.fillRect(px, (h - height) / 2, Math.max(1, bar - 0.5), height);
+  });
+  // Where the clip was first cut (faint), and the handles of the cut now
+  g.strokeStyle = 'rgba(255,255,255,0.18)';
+  g.setLineDash([2, 3]);
+  [wave.data.firstStart, wave.data.firstEnd].forEach((tt) => { g.beginPath(); g.moveTo(x(tt), 0); g.lineTo(x(tt), h); g.stroke(); });
+  g.setLineDash([3, 3]);
+  g.lineWidth = 2;
+  g.strokeStyle = '#4ade80';
+  [start, end].forEach((tt, k) => {
+    const px = x(tt);
+    g.beginPath(); g.moveTo(px, 0); g.lineTo(px, h); g.stroke();
+    g.fillStyle = wave.drag === k ? '#bbf7d0' : '#4ade80';  // grip
+    g.fillRect(px - (k ? 0 : 6), h / 2 - 12, 6, 24);
+  });
+  g.setLineDash([]);
+  // Playhead
+  if (wave.clip && !player.audio.paused && player.audio.duration) {
+    const px = x(start + player.audio.currentTime);
+    g.strokeStyle = '#fff';
+    g.lineWidth = 1;
+    g.beginPath(); g.moveTo(px, 0); g.lineTo(px, h); g.stroke();
+  }
+}
+
+/** Keep the playhead moving while the clip plays. */
+function animateWave() {
+  cancelAnimationFrame(wave.raf);
+  const step = () => {
+    if (!player.box || player.box.classList.contains('hidden') || player.mode !== REVIEW) return;
+    drawWave();
+    if (!player.audio.paused) wave.raf = requestAnimationFrame(step);
+  };
+  wave.raf = requestAnimationFrame(step);
+}
+
+function setupWaveDrag() {
+  const canvas = player.box.querySelector('.player-wave canvas');
+  player.audio.addEventListener('play', animateWave);
+  player.audio.addEventListener('pause', () => drawWave());
+  window.addEventListener('resize', () => drawWave());
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!wave.data) return;
+    const { x } = waveGeometry();
+    const px = e.offsetX;
+    const near = [wave.cut.start, wave.cut.end].map((tt) => Math.abs(x(tt) - px));
+    const k = near[0] <= near[1] ? 0 : 1;
+    if (near[k] > 28) return;  // grab a handle, not anywhere
+    wave.drag = k;
+    canvas.setPointerCapture(e.pointerId);
+    clearTimeout(player.timer);
+    player.audio.pause();
+    e.preventDefault();
+    e.stopPropagation();
+    drawWave();
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (wave.drag == null) return;
+    const { t } = waveGeometry();
+    const time = Math.min(wave.data.viewEnd, Math.max(wave.data.viewStart, t(e.offsetX)));
+    if (wave.drag === 0) wave.cut.start = Math.min(time, wave.cut.end - 0.4);
+    else wave.cut.end = Math.max(time, wave.cut.start + 0.4);
+    drawWave();
+  });
+  const release = async () => {
+    if (wave.drag == null) return;
+    wave.drag = null;
+    const clip = wave.clip;
+    const { start, end } = wave.cut;
+    if (Math.abs(start - clip.start) < 0.02 && Math.abs(end - clip.end) < 0.02) { drawWave(); return; }
+    // Apply the new cut (words cut off leave the text), then hear it from the start
+    const row = document.querySelector(`.clip[data-key="${CSS.escape(clipKey(clip))}"]`);
+    player.trimming = true;
+    const ok = await trimClip(clip, { start: Math.round(start * 1000) / 1000, end: Math.round(end * 1000) / 1000 },
+      () => row && row.rerender && row.rerender(), false);
+    player.trimming = false;
+    if (ok) playerGo(player.index); else loadWave(clip);
+  };
+  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointercancel', release);
+}
+
 /** Review player: trim ¼ s off the current clip's start or end, then hear it again. */
 async function playerTrim(side) {
   if (!player.box || player.index >= player.queue.length || player.trimming) return;
