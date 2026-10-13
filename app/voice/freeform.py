@@ -29,6 +29,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import wave
 from pathlib import Path
@@ -620,6 +621,7 @@ def _begin(voice: Voice, take_dir: Path, take: Dict[str, Any]) -> Dict[str, Any]
                     except Exception:  # matching across files is a bonus, never fatal
                         _LOGGER.exception("Matching the speakers of %s/%s to known people failed", voice.name, take_id)
             take.update(state="done", detail="")
+            prepare_filtered_soon(voice)  # its cleaned audio, for cutting clips
             _LOGGER.info("Freeform take %s/%s done in %.0fs: %.0fs of audio, %d clips%s",
                          voice.name, take_id, time.monotonic() - started, take["duration"] or 0,
                          len(take["segments"]),
@@ -645,6 +647,74 @@ def _begin(voice: Voice, take_dir: Path, take: Dict[str, Any]) -> Dict[str, Any]
 # ---- Review ---------------------------------------------------------------------------
 
 
+_FILTER_LOCKS: Dict[str, threading.Lock] = {}
+_FILTER_GUARD = threading.Lock()
+
+
+def _filtered_path(take_dir: Path, level: str) -> Path:
+    return take_dir / f"audio.{level}.flac"
+
+
+def filtered_ready(take_dir: Path, level: str) -> bool:
+    path, source = _filtered_path(take_dir, level), take_dir / "audio.wav"
+    try:
+        return path.stat().st_mtime >= source.stat().st_mtime
+    except OSError:
+        return False
+
+
+def filtered_audio(take_dir: Path, level: str, background: bool = False) -> Path:
+    """The whole file through the noise reduction once, cached next to it (FLAC). Clips are
+    cut from this, so cropping a clip only cuts: the filter never starts again at the new
+    edge (RNNoise adapts to what it has just heard and would gate the first syllables)."""
+    path = _filtered_path(take_dir, level)
+    if filtered_ready(take_dir, level):
+        return path
+    with _FILTER_GUARD:
+        lock = _FILTER_LOCKS.setdefault(str(path), threading.Lock())
+    with lock:
+        if filtered_ready(take_dir, level):
+            return path
+        tmp = path.with_name(f"audio.{level}.tmp.flac")
+        args = ["ffmpeg", "-v", "error", "-y", "-i", str(take_dir / "audio.wav"), "-af", DENOISE_FILTERS[level],
+                "-ac", "1", "-ar", str(CLIP_RATE), "-c:a", "flac", str(tmp)]
+        started = time.monotonic()
+        proc = subprocess.run((["nice", "-n", "15"] if background else []) + args, capture_output=True)
+        if proc.returncode != 0:
+            tmp.unlink(missing_ok=True)
+            raise RuntimeError(friendly_ffmpeg_error(proc.stderr.decode(errors="replace")))
+        tmp.replace(path)
+        _LOGGER.info("Noise reduction (%s) over all of %s: %.1f s", level, take_dir.name, time.monotonic() - started)
+    return path
+
+
+def prepare_filtered(voice: Voice) -> int:
+    """Clean every processed file once at its noise reduction level (in the background,
+    one after another), so its clips are ready to cut. Returns how many were made."""
+    made = 0
+    for take_dir in sorted(_takes_dir(voice).iterdir()) if _takes_dir(voice).is_dir() else []:
+        try:
+            take = _read(take_dir)
+            level = _level(take.get("denoise"))
+            if level == "strong" and not RNNOISE_MODEL.exists():
+                level = "light"
+            if take.get("state") != "done" or level == "off" or take_dir.name in _live \
+                    or not (take_dir / "audio.wav").exists() or filtered_ready(take_dir, level):
+                continue
+            filtered_audio(take_dir, level, background=True)
+            made += 1
+        except Exception as err:  # noqa: BLE001 - clips then fall back to filtering one by one
+            _LOGGER.warning("Couldn't prepare the cleaned audio of %s: %s", take_dir.name, err)
+    return made
+
+
+def prepare_filtered_soon(voice: Voice, delay: float = 5.0) -> None:
+    """prepare_filtered in the background, after `delay` (a file just processed is saved first)."""
+    timer = threading.Timer(delay, prepare_filtered, args=(voice,))
+    timer.daemon = True
+    timer.start()
+
+
 def clip_wav(voice: Voice, take_id: str, index: int, level: Optional[str] = None) -> bytes:
     """One clip as WAV, with the take's noise reduction (or the given level)."""
     take_dir = _take_dir(voice, take_id)
@@ -664,6 +734,16 @@ def clip_wav(voice: Voice, take_id: str, index: int, level: Optional[str] = None
             frames = src.readframes(int((segment["end"] - segment["start"]) * rate))
         pcm = np.frombuffer(frames, dtype=np.int16)
     else:
+        pcm = None
+        try:
+            # Cut from the file cleaned as a whole: the same sound whatever the clip's edges
+            import soundfile
+            with soundfile.SoundFile(str(filtered_audio(take_dir, level))) as cleaned:
+                cleaned.seek(min(int(segment["start"] * cleaned.samplerate), cleaned.frames))
+                pcm = cleaned.read(int((segment["end"] - segment["start"]) * cleaned.samplerate), dtype="int16")
+        except Exception as err:  # noqa: BLE001 - fall back to filtering just this clip
+            _LOGGER.warning("Cleaned audio of %s not available (%s): filtering the clip alone", take_id, err)
+    if level != "off" and pcm is None:
         # Filter the clip with some context around it, then cut the context off
         before = min(_CONTEXT, segment["start"])
         length = segment["end"] - segment["start"]
@@ -692,6 +772,7 @@ def set_denoise(voice: Voice, take_id: str, denoise: Any) -> Dict[str, Any]:
     take = _read(take_dir)
     take["denoise"] = _level(denoise)
     _write(take_dir, take)
+    prepare_filtered_soon(voice, 0)  # cleaned audio at the new level
     return _public(take_id, take)
 
 

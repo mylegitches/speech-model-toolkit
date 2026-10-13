@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 import zipfile
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -63,6 +64,12 @@ async def startup() -> None:
             freeform.pick_obvious_tracks(voice)
         except Exception:  # noqa: BLE001 - never stop the app starting
             _LOGGER.exception("Couldn't start the waiting files of %s", voice.name)
+    # Each processed file cleaned once at its noise reduction level (clips are cut from it),
+    # in the background, one file after another
+    def prepare_all() -> None:
+        for voice in store.list():
+            freeform.prepare_filtered(voice)
+    threading.Thread(target=prepare_all, daemon=True, name="clean-audio").start()
 
 
 @asynccontextmanager

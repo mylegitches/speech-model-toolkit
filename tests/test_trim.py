@@ -108,3 +108,35 @@ def test_drag_to_an_exact_cut_and_back_out_again(take, monkeypatch):
     out = freeform.trim_clip(voice, "t1", 0, start=-5, end=99)          # never past the margin
     assert (out["start"], out["end"]) == (0.0, 4.5)
     assert freeform.trim_clip(voice, "t1", 0, reset=True)["start"] == 1.0
+
+
+def test_cropping_only_cuts_the_cleaned_audio(tmp_path):
+    """The noise reduction runs over the whole file once: a later start cuts the same sound,
+    it doesn't filter again from the new edge (which gated the first syllables)."""
+    import shutil
+    import wave
+    import numpy as np
+    if not shutil.which("ffmpeg"):
+        pytest.skip("needs ffmpeg")
+    voice = VoiceStore(tmp_path).create("v", "en-US", "male")
+    take_dir = voice.root / "freeform" / "t1"
+    take_dir.mkdir(parents=True)
+    rate = freeform.CLIP_RATE
+    t = np.arange(int(5 * rate)) / rate
+    rng = np.random.default_rng(0)
+    audio = 0.02 * rng.normal(size=t.size) + 0.3 * np.sin(2 * np.pi * 180 * t) * (t > 1.2) * (t < 3.5)
+    with wave.open(str(take_dir / "audio.wav"), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate)
+        w.writeframes((np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes())
+    segments = [{"start": 1.0, "end": 3.0, "text": "a"}, {"start": 1.5, "end": 3.0, "text": "a"}]
+    (take_dir / "take.json").write_text(json.dumps({"state": "done", "denoise": "light", "segments": segments}))
+
+    def pcm(index):
+        import io
+        with wave.open(io.BytesIO(freeform.clip_wav(voice, "t1", index)), "rb") as w:
+            return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+
+    full, cropped = pcm(0), pcm(1)
+    assert (take_dir / "audio.light.flac").exists()
+    offset = int(0.5 * rate)
+    assert np.array_equal(cropped, full[offset: offset + len(cropped)])
