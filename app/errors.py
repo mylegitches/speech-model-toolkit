@@ -34,6 +34,21 @@ def setup_logging() -> None:
     logging.getLogger("uvicorn.access").setLevel(logging.INFO if debug else logging.WARNING)
     for noisy in ("httpx", "httpcore", "faster_whisper", "speechbrain", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    # Also to a file that outlives the container (LOG_DIR, /data/logs in Docker): a rebuild
+    # starts a new container and `docker logs` starts over, the file keeps the history.
+    # Rotates at 10 MB, keeping 10 old files (100 MB at most).
+    log_dir = os.environ.get("LOG_DIR", "")
+    if log_dir:
+        from logging.handlers import RotatingFileHandler
+        try:
+            os.makedirs(log_dir, exist_ok=True)
+            handler = RotatingFileHandler(os.path.join(log_dir, "server.log"), maxBytes=10 * 2**20,
+                                          backupCount=10, encoding="utf-8")
+            handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt="%Y-%m-%d %H:%M:%S"))
+            logging.getLogger().addHandler(handler)
+            logging.getLogger("uvicorn.error").addHandler(handler)  # server start/stop, crashes
+        except OSError as err:
+            logging.getLogger(__name__).warning("Can't write the log file in %s: %s", log_dir, err)
 
 
 def _message(err: BaseException) -> str:

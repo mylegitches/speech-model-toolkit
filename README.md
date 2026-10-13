@@ -133,7 +133,7 @@ The microphone is ignored while a reply plays, so the reply can't trigger the wa
 
 ## When something goes wrong
 
-Every error is shown in plain words where it happened, with what to do about it (for example "the GPU ran out of memory: lower the batch size", "this file has no audio track", "the file is too large for your reverse proxy"). Unexpected errors say so and point to the server log.
+The server log is also written to `data/logs/server.log` (rotating: 10 files of 10 MB), so it survives rebuilds; `docker logs speech-model-toolkit` only shows the current container. Every error is shown in plain words where it happened, with what to do about it (for example "the GPU ran out of memory: lower the batch size", "this file has no audio track", "the file is too large for your reverse proxy"). Unexpected errors say so and point to the server log.
 
 The server log has one line per event (time, level, component): training and exports starting, finishing or failing (with timings), downloads, freeform takes, speaker detection, auto-detect results, Test Lab sessions and AI calls (provider, model, time; never keys or what was said):
 

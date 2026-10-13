@@ -82,6 +82,7 @@ COPY app/ /app/app/
 ENV PYTHONUNBUFFERED=1 \
     WAKEWORD_DATA_DIR=/data/wakeword \
     WAKEWORD_OUTPUT_DIR=/data/wakeword-models \
+    LOG_DIR=/data/logs \
     VOICE_DATA_DIR=/data/voice \
     PROMPTS_DIR=/app/prompts \
     OPENWAKEWORD_DIR=/app/oww-src \
