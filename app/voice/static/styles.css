@@ -529,3 +529,7 @@ body.trimming { cursor: progress; }
   .player-wave { margin-top: 0.4rem; }
   .player-wave canvas { height: 84px; }
 }
+
+/* Review player: explicit Keep / Reject */
+.player-buttons .player-keep { color: var(--success); }
+.player-buttons .player-reject { color: var(--danger); }

@@ -248,6 +248,31 @@ async def api_trim_clip(name: str, body: TrimRequest) -> Dict[str, Any]:
                                    body.start, body.end)
 
 
+_EVENTS_LOCK = asyncio.Lock()
+
+
+@app.post("/api/voices/{name}/events")
+async def api_events(name: str, request: Request) -> Dict[str, Any]:
+    """Clicks and decisions from the page, appended to the click log (LOG_DIR/clicks.jsonl):
+    a permanent record of every review action, outliving the container."""
+    try:
+        body = json.loads((await request.body())[: 2 * 2**20] or b"{}")
+    except ValueError:
+        raise ValueError("Not JSON") from None
+    events = [e for e in (body.get("events") or [])[:500] if isinstance(e, dict)]
+    if not events:
+        return {"logged": 0}
+    log_dir = Path(os.environ.get("LOG_DIR") or (DATA_DIR.parent / "logs"))
+    lines = "".join(json.dumps({**e, "voice": name}, ensure_ascii=False)[:4000] + "\n" for e in events)
+    async with _EVENTS_LOCK:
+        def write() -> None:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with open(log_dir / "clicks.jsonl", "a", encoding="utf-8") as out:
+                out.write(lines)
+        await asyncio.to_thread(write)
+    return {"logged": len(events)}
+
+
 class CopyRequest(BaseModel):
     name: str
 

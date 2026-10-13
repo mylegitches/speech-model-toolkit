@@ -2174,21 +2174,15 @@ function renderCharacter() {
       + 'Untick lines with music, shouting, whispering or other voices; fix wrong words.',
   }));
 
-  const save = el('button', { type: 'button', className: 'btn btn--primary' });
-  // Saved clips whose words were changed here: corrected in the dataset with the same Save
-  const corrections = () => [...confirmed, ...possible].filter((c) => c.saved
-    && charUi.text.has(clipKey(c)) && charUi.text.get(clipKey(c)).trim() && charUi.text.get(clipKey(c)).trim() !== c.text);
+  // Everything is saved as you go: a tick means the clip is in the dataset, nothing else
+  const status = el('p', { className: 'hint take-foot' });
   const updateSave = () => {
-    const n = [...confirmed, ...possible].filter((c) => !c.saved && ticked(c)).length;
-    const fixes = corrections().length;
-    save.textContent = `✓ Save ${n} ticked clip${n === 1 ? '' : 's'}`
-      + (fixes ? ` and ${fixes} correction${fixes === 1 ? '' : 's'}` : '') + ` of ${name} to the dataset`;
-    save.disabled = n === 0 && fixes === 0;
+    const n = [...confirmed, ...possible].filter((c) => c.saved).length;
+    status.textContent = `Saved as you go: ${n} clip${n === 1 ? '' : 's'} of ${name} in the dataset. `
+      + 'Tick or ✓ Keep puts a clip in, untick or ✗ Reject takes it out, word fixes save when you leave the box.';
   };
-  // Default: confirmed ticked, possible not. A file with saved clips has been reviewed,
-  // so what wasn't saved there was left out on purpose: unticked.
   const reviewed = new Set([...confirmed, ...possible].filter((c) => c.saved).map((c) => c.take));
-  const ticked = (clip) => charUi.keep.get(clipKey(clip)) ?? (!clip.possible && !reviewed.has(clip.take));
+  const ticked = (clip) => Boolean(clip.saved);
   charUi.ticked = ticked;  // the player shows and changes the same state
 
   const sectionUpdaters = [];
@@ -2204,10 +2198,12 @@ function renderCharacter() {
       all.textContent = sectionAllTicked() ? 'Untick all' : 'Tick all';
       all.title = `${sectionAllTicked() ? 'Untick' : 'Tick'} every ${title.toLowerCase()} clip not saved yet`;
     };
-    all.addEventListener('click', () => {
+    all.addEventListener('click', async () => {
       const on = !sectionAllTicked();
-      clips.forEach((c) => { if (!c.saved) charUi.keep.set(clipKey(c), on); });
-      renderCharacter();
+      all.disabled = true;
+      logEvent(on ? 'tick all (section)' : 'untick all (section)', null, { section: title, clips: clips.length });
+      if (await keepClips(clips, on)) openCharacter(name, true);
+      all.disabled = false;
     });
     sectionUpdaters.push(updateAll);
     updateAll();
@@ -2269,21 +2265,8 @@ function renderCharacter() {
       const tickFile = (on) => async (e) => {
         e.preventDefault();  // a button in the summary would otherwise open/close the file
         e.stopPropagation();
-        const savedHere = on ? [] : fileClips.filter((c) => c.saved);
-        if (savedHere.length) {
-          try {
-            const result = await postJson(voiceUrl('/clips/unsave'), {
-              clips: savedHere.map((c) => ({ take: c.take, index: c.index })),
-            });
-            updateRecorded(result.recorded);
-          } catch (err) {
-            SMT.showError(err.message);
-            return;
-          }
-          savedHere.forEach((c) => { c.saved = false; });
-          loadTakes();  // the Files table
-        }
-        fileClips.forEach((c) => { if (!c.saved) charUi.keep.set(clipKey(c), on); });
+        logEvent(on ? 'tick all (episode)' : 'untick all (episode)', null, { file: fileClips[0].file, clips: fileClips.length });
+        if (!await keepClips(fileClips, on)) return;
         const list = details.querySelector('.clips');
         if (list) {
           // Redraw this file's rows in place (no jump in the list)
@@ -2327,33 +2310,7 @@ function renderCharacter() {
     panel.append(el('p', { className: 'hint', textContent: 'No clips of this character.' }));
   }
 
-  save.addEventListener('click', async () => {
-    const clips = [...confirmed, ...possible].filter((c) => !c.saved && ticked(c))
-      .map((c) => ({ take: c.take, index: c.index, text: (charUi.text.get(clipKey(c)) ?? c.text).trim() }))
-      .filter((c) => c.text);
-    const fixes = corrections().map((c) => ({ take: c.take, index: c.index, text: charUi.text.get(clipKey(c)).trim() }));
-    save.disabled = true;
-    save.textContent = 'Saving…';
-    const done = [];
-    try {
-      if (clips.length) {
-        const result = await postJson(voiceUrl('/clips/save'), { clips });
-        updateRecorded(result.recorded);
-        done.push(`added ${result.saved} clips`);
-      }
-      if (fixes.length) {
-        const result = await postJson(voiceUrl('/clips/text'), { clips: fixes });
-        fixes.forEach((c) => charUi.text.delete(`${c.take}:${c.index}`));
-        done.push(`corrected ${result.updated} clip${result.updated === 1 ? '' : 's'}`);
-      }
-      $('#free-upload-status').textContent = `${name}: ${done.join(' and ')} in the dataset.`;
-    } catch (err) {
-      SMT.showError(err.message);
-    }
-    openCharacter(name, true);  // shows them as saved; your ticks and edits stay
-    loadTakes();  // the Files table's Added / Edited / Left out
-  });
-  panel.append(el('div', { className: 'take-foot' }, save));
+  panel.append(status);
   updateSave();
   // Scroll positions only take once the lists are on the page
   panel.querySelectorAll('details.char-file').forEach((d) => {
@@ -2398,11 +2355,80 @@ function fileSummary(clips, ticked) {
     `${n} ticked`].filter(Boolean).join(' · ');
 }
 
+/** Tick all / Untick all: these clips straight into (or out of) the dataset. */
+async function keepClips(clips, on) {
+  const todo = clips.filter((c) => Boolean(c.saved) !== on);
+  if (!todo.length) return true;
+  try {
+    const result = on
+      ? await postJson(voiceUrl('/clips/save'), {
+        clips: todo.map((c) => ({ take: c.take, index: c.index, text: (charUi.text.get(clipKey(c)) ?? c.text).trim() })),
+      })
+      : await postJson(voiceUrl('/clips/unsave'), { clips: todo.map((c) => ({ take: c.take, index: c.index })) });
+    updateRecorded(result.recorded);
+  } catch (err) {
+    SMT.showError(err.message);
+    return false;
+  }
+  todo.forEach((c) => { c.saved = on; charUi.text.delete(clipKey(c)); });
+  loadTakes();  // the Files table
+  return true;
+}
+
+// ---- Click log ---------------------------------------------------------------------
+// Every click, key and decision on this page goes to data/logs/clicks.jsonl on the server
+// (sent in small batches), so what happened in a review can always be looked up.
+
+const clickLog = [];
+
+function logEvent(action, clip = null, extra = {}) {
+  clickLog.push({
+    t: new Date().toISOString(), view: VIEW, action, voice: voice?.name || null, character: charUi?.name || null,
+    ...(clip ? { take: clip.take, index: clip.index, file: clip.file, words: (clip.text || '').slice(0, 160),
+      inDataset: Boolean(clip.saved) } : {}),
+    ...extra,
+  });
+  if (clickLog.length >= 25) flushClickLog();
+}
+
+function flushClickLog() {
+  if (!clickLog.length || !voice) return;
+  const body = JSON.stringify({ events: clickLog.splice(0) });
+  const url = voiceUrl('/events');
+  if (!(navigator.sendBeacon && navigator.sendBeacon(url, new Blob([body], { type: 'application/json' })))) {
+    fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+  }
+}
+setInterval(flushClickLog, 3000);
+window.addEventListener('pagehide', flushClickLog);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushClickLog(); });
+
+/** The review clip a click was about: its row in the list, or the one in the player. */
+function clipOfElement(node) {
+  const row = node.closest?.('.clip[data-key]');
+  const all = charUi.data ? [...charUi.data.confirmed, ...charUi.data.possible] : [];
+  if (row) return all.find((c) => clipKey(c) === row.dataset.key) || null;
+  if (node.closest?.('.player') && player.queue?.[player.index]) return player.queue[player.index].clip;
+  return null;
+}
+
+// Every click on something you can press, with what it was and where
+document.addEventListener('click', (e) => {
+  const target = e.target.closest?.('button, a, summary, input, select, .chip, label, .player-screen');
+  if (!target) return;
+  const label = (target.textContent || target.title || target.value || target.type || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  logEvent('click', clipOfElement(target), {
+    label, element: target.tagName.toLowerCase(), checked: target.type === 'checkbox' ? target.checked : undefined,
+    area: target.closest('.player') ? 'player' : target.closest('#character-panel') ? 'review' : target.closest('section')?.id || '',
+  });
+}, true);
+
 const TRIM_STEP = 0.25;  // seconds per click
 
 /** Trim a review clip (and its saved copy, if it's in the dataset), then play it again. */
 async function trimClip(clip, body, redraw, play = true) {
   const key = clipKey(clip);
+  logEvent(body.undo ? 'undo trim' : body.reset ? 'reset trims' : body.start != null ? 'crop (dragged)' : 'trim', clip, body);
   // Words cut off come off the text: send the words as they are now (with corrections)
   const words = charUi.text.get(key) ?? clip.text;
   document.body.classList.add('trimming');
@@ -2431,28 +2457,13 @@ function characterClipRow(clip, ticked, changed) {
   const keep = el('input', { type: 'checkbox', checked: clip.saved || ticked(clip),
     title: clip.saved ? 'In the dataset: untick to take it out' : 'Save this clip' });
   keep.addEventListener('change', async () => {
-    if (clip.saved) {
-      // Out of the dataset right away, no questions; only this row changes (no jump in the list)
-      keep.disabled = true;
-      try {
-        const result = await postJson(voiceUrl('/clips/unsave'), { clips: [{ take: clip.take, index: clip.index }] });
-        updateRecorded(result.recorded);
-      } catch (err) {
-        SMT.showError(err.message);
-        keep.checked = true;
-        keep.disabled = false;
-        return;
-      }
-      clip.saved = false;
-      charUi.keep.set(key, false);
-      outer.replaceWith(characterClipRow(clip, ticked, changed));
-      changed();
-      loadTakes();  // the Files table
-      return;
+    // Into or out of the dataset right away; only this row changes (no jump in the list)
+    keep.disabled = true;
+    logEvent(keep.checked ? 'keep' : 'reject', clip, { from: 'list tick box' });
+    if (!await REVIEW.decide(clip, keep.checked)) {
+      keep.checked = !keep.checked;
+      keep.disabled = false;
     }
-    charUi.keep.set(key, keep.checked);
-    row.classList.toggle('skipped', !keep.checked);
-    changed();
   });
   const play = el('button', { type: 'button', className: 'btn btn--secondary', textContent: '▶' });
   play.addEventListener('click', () => playClip({ id: clip.take, denoise: clip.denoise }, clip.index, play));
@@ -2460,16 +2471,21 @@ function characterClipRow(clip, ticked, changed) {
   const status = el('span', { className: 'dur', textContent: clip.saved ? '✓ saved' : `${(clip.end - clip.start).toFixed(1)}s`,
     title: `at ${clock(clip.start)} in ${clip.file}` });
   const markEdited = () => {
-    // A saved clip with new words: corrected in the dataset with the next Save
+    // A saved clip with new words: saved when you leave the box (or press Enter)
     const edited = clip.saved && text.value.trim() !== clip.text;
     row.classList.toggle('clip--edited', edited);
-    if (clip.saved) status.textContent = edited ? 'edited' : '✓ saved';
+    if (clip.saved) status.textContent = edited ? 'saving…' : '✓ saved';
   };
-  if (clip.saved) text.title = 'In the dataset: fix the words, then Save to update it';
+  if (clip.saved) text.title = 'In the dataset: fix the words; they\'re saved when you leave the box';
   text.addEventListener('input', () => {
     charUi.text.set(key, text.value);
     markEdited();
-    changed();
+  });
+  text.addEventListener('keydown', (e) => { if (e.key === 'Enter') text.blur(); });
+  text.addEventListener('change', async () => {
+    logEvent('fix words', clip, { words: text.value.trim(), from: 'list' });
+    await REVIEW.saveText(clip, text.value);
+    markEdited();
   });
   markEdited();
   // Trim a quarter second off the start or end (a laugh, someone else's last word); click again for more
@@ -3681,13 +3697,13 @@ const REVIEW = {
     ['unsaved', 'Not saved (left out or not reviewed)', (clip) => !clip.saved],
   ],
   toggleLabel: '✓ In / out',
-  toggleTitle: 'Take this clip in, or leave it out; a saved clip comes back out of the dataset (D)',
-  keys: 'Space pause/play · ↑ ↓ previous/next · R or ← replay · [ ] trim ¼ s off the start / end, U undo the last trim · D take in / leave out · F fix the words · Esc close · phone: swipe right keep, left reject, up/down next/previous, tap to fix the words',
+  toggleTitle: 'Take this clip in, or leave it out',
+  keys: 'K keep · D reject (saved right away, then the next clip) · Space pause/play · ↑ ↓ previous/next · R or ← replay · [ ] trim ¼ s off the start / end, U undo the last trim · F fix the words · Esc close · phone: swipe right keep, left reject, up/down next/previous, tap to fix the words',
   row: (clip) => document.querySelector(`#character-panel .clip[data-key="${CSS.escape(clipKey(clip))}"]`),
   text: (clip) => charUi.text.get(clipKey(clip)) ?? clip.text,
   // (start/end in the address: a trimmed clip is never played from an old copy)
   audio: (clip) => voiceUrl(`/freeform/${clip.take}/clips/${clip.index}.wav?denoise=${clip.denoise}&at=${clip.start}-${clip.end}`),
-  badge: (clip) => (clip.saved ? ['✓ Saved', 'ok'] : charUi.ticked?.(clip) ? ['Will be saved', 'ok'] : ['Left out', 'bad']),
+  badge: (clip) => (clip.saved ? ['✓ In the dataset', 'ok'] : ['Not in the dataset', 'bad']),
   async toggle(clip) {
     const key = clipKey(clip);
     if (clip.saved) {
@@ -3707,14 +3723,30 @@ const REVIEW = {
     }
     this.row(clip)?.rerender?.();
   },
-  setText(clip, value) {
-    const key = clipKey(clip);
-    if (value && value !== clip.text) charUi.text.set(key, value); else charUi.text.delete(key);
+  async setText(clip, value) {
+    await this.saveText(clip, value);
     this.row(clip)?.rerender?.();
+  },
+  /** New words for a clip: straight into the dataset if it's in there, else kept for when it is. */
+  async saveText(clip, value) {
+    const key = clipKey(clip);
+    const words = String(value || '').trim();
+    if (!words || words === clip.text) { charUi.text.delete(key); return true; }
+    if (!clip.saved) { charUi.text.set(key, words); return true; }
+    try {
+      await postJson(voiceUrl('/clips/text'), { clips: [{ take: clip.take, index: clip.index, text: words }] });
+    } catch (err) {
+      SMT.showError(err.message);
+      return false;
+    }
+    clip.text = words;
+    charUi.text.delete(key);
+    return true;
   },
   /** Swipe: keep (into the dataset now, with the words as shown) or reject (out of it now). */
   async decide(clip, keep) {
     const key = clipKey(clip);
+    logEvent(keep ? 'kept' : 'rejected', clip, { wasInDataset: clip.saved });
     try {
       if (keep && !clip.saved) {
         const text = this.text(clip);
@@ -3732,6 +3764,7 @@ const REVIEW = {
       }
     } catch (err) {
       SMT.showError(err.message);
+      logEvent('error', clip, { message: err.message });
       return false;
     }
     charUi.keep.set(key, keep);
@@ -3786,11 +3819,13 @@ function buildPlayer() {
       button('⏭', 'Next clip (↓)', () => playerGo(player.index + 1)),
       button('↺', 'Play this clip again (R or ←)', () => playerReplay()),
       button('', '', () => playerMark(), 'player-toggle player-wide'),
-      button('✎ Fix', 'Correct the words: pauses; Enter keeps the change and plays on, Esc cancels (F)', () => playerEdit(), 'player-wide'),
+      button('✓ Keep', 'Keep this clip: into the dataset now, then the next one (K)', () => playerDecide(true), 'player-wide player-keep'),
+      button('✗ Reject', 'Reject this clip: out of the dataset now, then the next one (D)', () => playerDecide(false), 'player-wide player-reject'),
       button('✂ start', 'Trim ¼ second off the start of this clip ([)', () => playerTrim('front'), 'player-trim'),
       button('↶ undo', 'Undo the last trim of this clip (U)', () => playerTrim('undo'), 'player-trim player-trim-undo'),
       button('reset', 'Undo all trims of this clip: as it was', () => playerTrim('reset'), 'player-trim player-trim-reset'),
-      button('end ✂', 'Trim ¼ second off the end of this clip (])', () => playerTrim('back'), 'player-trim')));
+      button('end ✂', 'Trim ¼ second off the end of this clip (])', () => playerTrim('back'), 'player-trim'),
+      button('✎ Fix', 'Correct the words: pauses; Enter keeps the change and plays on, Esc cancels (F)', () => playerEdit(), 'player-wide')));
   const close = button('✕', 'Close (Esc)', () => stopPlayer(), 'player-close');
   const keys = el('div', { className: 'player-keys hint' });
   box.append(close, screen, bar, controls, keys, audio);
@@ -3886,7 +3921,9 @@ function startPlayer(source, mode = MANAGER) {
   toggle.textContent = mode.toggleLabel;
   toggle.title = mode.toggleTitle;
   player.box.querySelector('.player-keys').textContent = mode.keys;
-  player.box.querySelectorAll('.player-trim').forEach((b) => show(b, mode === REVIEW));  // review clips only
+  player.box.querySelectorAll('.player-trim, .player-keep, .player-reject').forEach((b) => show(b, mode === REVIEW));  // review clips only
+  show(toggle, mode !== REVIEW);  // the review has explicit Keep / Reject instead of a toggle
+  logEvent('player opened', null, { mode: mode.name, clips: source.length });
   show(player.box, true);
   document.body.classList.add('player-open');
   immersive(true);  // phones: the player takes the whole screen, the app's bars go
@@ -4199,6 +4236,18 @@ async function playerSwipe(keep) {
   }, 220);
 }
 
+/** Review player: keep or reject the clip on screen (saved right away), then the next one. */
+async function playerDecide(keep) {
+  const entry = player.queue[player.index];
+  if (!entry || player.deciding) return;
+  player.deciding = true;
+  clearTimeout(player.timer);
+  const ok = await REVIEW.decide(entry.clip, keep);
+  playerBadge();
+  player.deciding = false;
+  if (ok) playerGo(player.index + 1);
+}
+
 async function playerMark() {
   const entry = player.queue[player.index];
   if (!entry) return;
@@ -4237,6 +4286,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === ' ') { e.preventDefault(); playerToggle(); }
   else if (e.key === 'ArrowDown') { e.preventDefault(); playerGo(player.index + 1); }
   else if (e.key === 'ArrowUp') { e.preventDefault(); playerGo(player.index - 1); }
+  else if ((e.key === 'd' || e.key === 'D' || e.key === 'Delete') && player.mode === REVIEW) { e.preventDefault(); logEvent('key', player.queue[player.index]?.clip, { key: e.key }); playerDecide(false); }
+  else if ((e.key === 'k' || e.key === 'K') && player.mode === REVIEW) { e.preventDefault(); logEvent('key', player.queue[player.index]?.clip, { key: e.key }); playerDecide(true); }
   else if (e.key === 'd' || e.key === 'D' || e.key === 'Delete') { e.preventDefault(); playerMark(); }
   else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); playerEdit(); }
   else if (e.key === 'r' || e.key === 'R' || e.key === 'ArrowLeft') { e.preventDefault(); playerReplay(); }
