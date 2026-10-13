@@ -3788,8 +3788,8 @@ function buildPlayer() {
       button('', '', () => playerMark(), 'player-toggle player-wide'),
       button('✎ Fix', 'Correct the words: pauses; Enter keeps the change and plays on, Esc cancels (F)', () => playerEdit(), 'player-wide'),
       button('✂ start', 'Trim ¼ second off the start of this clip ([)', () => playerTrim('front'), 'player-trim'),
-      button('↶', 'Undo the last trim of this clip (U)', () => playerTrim('undo'), 'player-trim'),
-      button('↺', 'Undo all trims of this clip: as it was', () => playerTrim('reset'), 'player-trim'),
+      button('↶ undo', 'Undo the last trim of this clip (U)', () => playerTrim('undo'), 'player-trim player-trim-undo'),
+      button('reset', 'Undo all trims of this clip: as it was', () => playerTrim('reset'), 'player-trim player-trim-reset'),
       button('end ✂', 'Trim ¼ second off the end of this clip (])', () => playerTrim('back'), 'player-trim')));
   const close = button('✕', 'Close (Esc)', () => stopPlayer(), 'player-close');
   const keys = el('div', { className: 'player-keys hint' });
@@ -4023,6 +4023,9 @@ async function loadWave(clip) {
   if (player.mode !== REVIEW) return;
   wave.clip = clip;
   wave.data = null;
+  // Undo / reset only when there's a trim to take back
+  player.box.querySelector('.player-trim-undo').disabled = !clip.trimmed;
+  player.box.querySelector('.player-trim-reset').disabled = !clip.trimmed;
   wave.cut = { start: clip.start, end: clip.end };
   drawWave();
   try {
