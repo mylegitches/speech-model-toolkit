@@ -3926,6 +3926,9 @@ function buildPlayer() {
   // 🎤 while fixing: say the line, the words heard replace the text
   const mic = screen.querySelector('.player-mic');
   mic.addEventListener('pointerdown', (e) => e.preventDefault());  // the edit box keeps its focus
+  // ✎ Fix keeps a selection made in the words (pressing a button would otherwise clear it)
+  [...box.querySelectorAll('.player-buttons .btn')].find((b) => b.textContent === '✎ Fix')
+    ?.addEventListener('mousedown', (e) => e.preventDefault());
   mic.addEventListener('click', () => narrate(edit, mic));
   // Click the words to fix them (like ✎ Fix; on a phone a tap does it)
   screen.querySelector('.player-subtitle').addEventListener('click', () => {
@@ -4393,16 +4396,34 @@ async function playerMark() {
   playerBadge();
 }
 
+/** [start, end] of the text selected inside `node`, or null if nothing there is selected. */
+function selectionIn(node) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0);
+  if (!node.contains(range.startContainer) || !node.contains(range.endContainer)) return null;
+  const before = document.createRange();
+  before.selectNodeContents(node);
+  before.setEnd(range.startContainer, range.startOffset);
+  const start = before.toString().length;
+  return [start, start + range.toString().length];
+}
+
 function playerEdit() {
   const entry = player.queue[player.index];
   if (!entry) return;
   playerToggle(false);
   const edit = player.box.querySelector('.player-edit');
+  const subtitle = player.box.querySelector('.player-subtitle');
+  // Words selected in the subtitle stay selected in the box, ready to type over
+  const selected = selectionIn(subtitle);
   edit.value = player.mode.text(entry.clip);
   edit.dataset.index = String(player.index);
-  player.box.querySelector('.player-subtitle').classList.add('hidden');
+  subtitle.classList.add('hidden');
   edit.classList.remove('hidden');
   edit.focus();
+  if (selected && subtitle.textContent === edit.value) edit.setSelectionRange(selected[0], selected[1]);
+  else edit.setSelectionRange(edit.value.length, edit.value.length);  // nothing selected: cursor at the end
 }
 
 // ---- Narration: speak the words of a clip instead of typing them ---------------------
