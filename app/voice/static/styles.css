@@ -541,3 +541,7 @@ body.trimming { cursor: progress; }
 @media (max-width: 640px), (pointer: coarse) and (max-height: 540px) {
   .player-wave-tools .btn { min-height: 36px; padding: 0.3rem 0.8rem; font-size: 0.85rem; }
 }
+
+/* Episodes with nothing in the dataset yet: pending, tinted orange */
+.char-file.char-file--pending > summary { background: rgba(245, 158, 11, 0.12); border-radius: 6px; padding: 0.25rem 0.4rem; }
+.char-file.char-file--pending > summary .char-file-name { color: #fcd34d; }

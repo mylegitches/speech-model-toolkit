@@ -2256,8 +2256,11 @@ function renderCharacter() {
         tickToggle.title = on ? 'Untick every clip of this file, and take its saved clips out of the dataset'
           : 'Tick every clip of this file';
       };
+      // An episode with nothing in the dataset yet: tinted orange, still to review
+      const markPending = () => details.classList.toggle('char-file--pending', !fileClips.some((c) => c.saved));
       const refresh = () => {
         label.textContent = fileSummary(fileClips);
+        markPending();
         updateTick();
         sectionUpdaters.forEach((f) => f());
         updateSave();
@@ -2287,6 +2290,7 @@ function renderCharacter() {
       };
       tickToggle.addEventListener('click', (e) => tickFile(!fileAllTicked())(e));
       updateTick();
+      markPending();
       const playFile = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '▶ Play',
         title: 'Listen to this episode\'s clips one after another; D takes one in or leaves it out, F fixes the words' });
       playFile.addEventListener('click', (e) => {
