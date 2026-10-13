@@ -3819,7 +3819,13 @@ function buildPlayer() {
     el('div', { className: 'player-from' }),
     el('span', { className: 'player-badge hidden' }),
     // Review player: the clip's waveform with a handle at each end of the cut, to drag
-    el('div', { className: 'player-wave hidden' }, el('canvas', { title: 'Drag the start or end of the clip; let go to apply (↶ undoes)' })),
+    el('div', { className: 'player-wave hidden' },
+      el('canvas', { title: 'Drag the start or end of the clip; let go to apply (↶ undoes). Wheel or pinch to zoom, Shift+wheel to scroll' }),
+      el('div', { className: 'player-wave-tools' },
+        el('button', { type: 'button', className: 'btn btn--ghost wave-zoom-in', textContent: '🔍 In', title: 'Zoom in on the start of the clip' }),
+        el('button', { type: 'button', className: 'btn btn--ghost wave-zoom-out', textContent: '🔍 Out', title: 'Zoom in on the end of the clip' }),
+        el('button', { type: 'button', className: 'btn btn--ghost wave-zoom-all', textContent: 'Whole clip', title: 'Zoom back out' }),
+        el('span', { className: 'wave-zoom-label hint' }))),
     el('div', { className: 'player-subtitle' }),
     el('input', { type: 'text', className: 'player-edit hidden' }));
   const bar = el('div', { className: 'player-bar' }, el('div', { className: 'player-fill' }));
@@ -4067,22 +4073,26 @@ function playerToggle(forcePlay) {
 /** The current clip again, from the start (then carries on as usual). */
 // ---- Waveform with crop handles (review player) ----------------------------------
 
-const wave = { data: null, clip: null, drag: null, cut: null, raf: 0 };
+const wave = { data: null, clip: null, drag: null, cut: null, raf: 0, zoom: null };  // zoom: [from, to] seconds, or null = all
+const WAVE_BINS = 4000;  // detail fetched: ~1 ms per bar, enough to zoom in close
 
 /** Fetch the waveform around the clip now playing and draw it (review player only). */
 async function loadWave(clip) {
   const box = player.box.querySelector('.player-wave');
   show(box, player.mode === REVIEW);
   if (player.mode !== REVIEW) return;
+  // Same clip again (after a trim): stay zoomed where you were, to keep fine-tuning
+  const keepZoom = wave.clip && clipKey(wave.clip) === clipKey(clip) ? wave.zoom : null;
   wave.clip = clip;
   wave.data = null;
+  wave.zoom = keepZoom;
   // Undo / reset only when there's a trim to take back
   player.box.querySelector('.player-trim-undo').disabled = !clip.trimmed;
   player.box.querySelector('.player-trim-reset').disabled = !clip.trimmed;
   wave.cut = { start: clip.start, end: clip.end };
   drawWave();
   try {
-    const data = await api(voiceUrl(`/freeform/${clip.take}/clips/${clip.index}/view`));
+    const data = await api(voiceUrl(`/freeform/${clip.take}/clips/${clip.index}/view?bins=${WAVE_BINS}`));
     if (wave.clip !== clip) return;  // moved on meanwhile
     wave.data = data;
     wave.cut = { start: data.start, end: data.end };
@@ -4096,10 +4106,10 @@ function waveGeometry() {
   const canvas = player.box.querySelector('.player-wave canvas');
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
-  const { viewStart, viewEnd } = wave.data || { viewStart: 0, viewEnd: 1 };
+  const [viewStart, viewEnd] = wave.zoom || (wave.data ? [wave.data.viewStart, wave.data.viewEnd] : [0, 1]);
   const x = (t) => ((t - viewStart) / (viewEnd - viewStart)) * w;
   const t = (px) => viewStart + (px / w) * (viewEnd - viewStart);
-  return { canvas, w, h, x, t };
+  return { canvas, w, h, x, t, viewStart, viewEnd };
 }
 
 function drawWave() {
@@ -4119,15 +4129,25 @@ function drawWave() {
   }
   const { peaks } = wave.data;
   const { start, end } = wave.cut;
-  const bar = w / peaks.length;
-  peaks.forEach((p, i) => {
-    const px = i * bar;
-    const time = wave.data.viewStart + (i / peaks.length) * (wave.data.viewEnd - wave.data.viewStart);
+  // The bars in view (zoomed or not), at most one per 2 px: each bar the loudest of its bins
+  const binTime = (wave.data.viewEnd - wave.data.viewStart) / peaks.length;
+  const [from, to] = [waveGeometry().viewStart, waveGeometry().viewEnd];
+  const first = Math.max(0, Math.floor((from - wave.data.viewStart) / binTime));
+  const last = Math.min(peaks.length, Math.ceil((to - wave.data.viewStart) / binTime));
+  const per = Math.max(1, Math.ceil((last - first) / (w / 2)));
+  for (let i = first; i < last; i += per) {
+    let p = 0;
+    for (let k = i; k < Math.min(last, i + per); k += 1) p = Math.max(p, peaks[k]);
+    const time = wave.data.viewStart + i * binTime;
+    const px = x(time);
+    const width = Math.max(1, x(time + per * binTime) - px - 0.5);
     const inside = time >= start && time <= end;
     const height = Math.max(1, p * (h - 6));
     g.fillStyle = inside ? '#22c55e' : '#374151';
-    g.fillRect(px, (h - height) / 2, Math.max(1, bar - 0.5), height);
-  });
+    g.fillRect(px, (h - height) / 2, width, height);
+  }
+  const label = player.box.querySelector('.wave-zoom-label');
+  label.textContent = wave.zoom ? `zoomed: ${(to - from).toFixed(2)} s shown` : '';
   // Where the clip was first cut (faint), and the trim handles (in and out points) now
   g.strokeStyle = 'rgba(255,255,255,0.18)';
   g.setLineDash([2, 3]);
@@ -4162,8 +4182,47 @@ function animateWave() {
   wave.raf = requestAnimationFrame(step);
 }
 
+/** Zoom the waveform to [from, to] seconds (null: the whole clip and its margin). */
+function zoomWave(range) {
+  if (!wave.data) return;
+  const full = [wave.data.viewStart, wave.data.viewEnd];
+  if (!range) { wave.zoom = null; drawWave(); return; }
+  let [a, b] = range;
+  const span = Math.min(full[1] - full[0], Math.max(0.15, b - a));  // never closer than 0.15 s
+  if (span >= full[1] - full[0] - 1e-6) { wave.zoom = null; drawWave(); return; }
+  a = Math.min(Math.max(full[0], a), full[1] - span);
+  wave.zoom = [a, a + span];
+  drawWave();
+}
+
+/** Zoom in on one end of the clip: about a second around that handle. */
+function zoomOnHandle(k) {
+  if (!wave.data) return;
+  const at = k === 0 ? wave.cut.start : wave.cut.end;
+  zoomWave([at - 0.5, at + 0.5]);
+  logEvent(k === 0 ? 'zoom on start' : 'zoom on end', wave.clip);
+}
+
 function setupWaveDrag() {
   const canvas = player.box.querySelector('.player-wave canvas');
+  player.box.querySelector('.wave-zoom-in').addEventListener('click', () => zoomOnHandle(0));
+  player.box.querySelector('.wave-zoom-out').addEventListener('click', () => zoomOnHandle(1));
+  player.box.querySelector('.wave-zoom-all').addEventListener('click', () => zoomWave(null));
+  // Wheel / trackpad pinch: zoom around the pointer; Shift+wheel: scroll along
+  canvas.addEventListener('wheel', (e) => {
+    if (!wave.data) return;
+    e.preventDefault();
+    const { t, viewStart, viewEnd } = waveGeometry();
+    const span = viewEnd - viewStart;
+    if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      const shift = ((e.shiftKey ? e.deltaY : e.deltaX) / 400) * span;
+      zoomWave([viewStart + shift, viewEnd + shift]);
+      return;
+    }
+    const at = t(e.offsetX);
+    const factor = Math.pow(1.0025, e.deltaY);  // up/pinch out: closer
+    zoomWave([at - (at - viewStart) * factor, at + (viewEnd - at) * factor]);
+  }, { passive: false });
   player.audio.addEventListener('play', animateWave);
   player.audio.addEventListener('pause', () => drawWave());
   window.addEventListener('resize', () => drawWave());
@@ -4175,7 +4234,7 @@ function setupWaveDrag() {
     const k = near[0] <= near[1] ? 0 : 1;
     if (near[k] > 28) return;  // grab a handle, not anywhere
     wave.drag = k;
-    canvas.setPointerCapture(e.pointerId);
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* keeps working without capture */ }
     clearTimeout(player.timer);
     player.audio.pause();
     e.preventDefault();

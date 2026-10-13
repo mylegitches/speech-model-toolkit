@@ -685,9 +685,10 @@ async def api_freeform_update(name: str, take_id: str, request: DenoiseRequest) 
 
 
 @app.get("/api/voices/{name}/freeform/{take_id}/clips/{index}/view")
-async def api_clip_view(name: str, take_id: str, index: int) -> Dict[str, Any]:
-    """The waveform around a clip, for dragging its start and end in the review player."""
-    return await asyncio.to_thread(freeform.clip_view, store.get(name), take_id, index)
+async def api_clip_view(name: str, take_id: str, index: int, bins: int = 400) -> Dict[str, Any]:
+    """The waveform around a clip, for dragging its start and end in the review player
+    (bins: detail; the player asks for enough to zoom in to a few milliseconds)."""
+    return await asyncio.to_thread(freeform.clip_view, store.get(name), take_id, index, max(50, min(8000, bins)))
 
 
 @app.get("/api/voices/{name}/freeform/{take_id}/clips/{index}.wav")

@@ -533,3 +533,11 @@ body.trimming { cursor: progress; }
 /* Review player: explicit Keep / Reject */
 .player-buttons .player-keep { color: var(--success); }
 .player-buttons .player-reject { color: var(--danger); }
+
+/* Waveform zoom: closer to place a trim handle exactly */
+.player-wave-tools { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.3rem; flex-wrap: wrap; }
+.player-wave-tools .btn { padding: 0.15rem 0.55rem; min-height: 0; font-size: 0.78rem; color: #cbd5e1; }
+.player-wave-tools .wave-zoom-label { font-size: 0.75rem; margin-left: auto; }
+@media (max-width: 640px), (pointer: coarse) and (max-height: 540px) {
+  .player-wave-tools .btn { min-height: 36px; padding: 0.3rem 0.8rem; font-size: 0.85rem; }
+}
