@@ -2440,7 +2440,7 @@ const TRIM_STEP = 0.25;  // seconds per click
 /** Trim a review clip (and its saved copy, if it's in the dataset), then play it again. */
 async function trimClip(clip, body, redraw, play = true) {
   const key = clipKey(clip);
-  logEvent(body.undo ? 'undo trim' : body.reset ? 'reset trims' : body.start != null ? 'crop (dragged)' : 'trim', clip, body);
+  logEvent(body.undo ? 'undo trim' : body.reset ? 'reset trims' : body.silence ? 'silence' : body.start != null ? 'crop (dragged)' : 'trim', clip, body);
   // Words cut off come off the text: send the words as they are now (with corrections)
   const words = charUi.text.get(key) ?? clip.text;
   document.body.classList.add('trimming');
@@ -2456,7 +2456,7 @@ async function trimClip(clip, body, redraw, play = true) {
   }
   // Trimming a clip means you want it: it's kept (into the dataset) unless you reject it.
   // Undo / reset leave keep or reject as it was.
-  const trimmed = body.front || body.back || body.start != null;
+  const trimmed = body.front || body.back || body.start != null || body.silence;
   if (trimmed && !clip.saved) {
     logEvent('kept (trimmed)', clip);
     await REVIEW.decide(clip, true);
@@ -3824,7 +3824,7 @@ function buildPlayer() {
     el('span', { className: 'player-badge hidden' }),
     // Review player: the clip's waveform with a handle at each end of the cut, to drag
     el('div', { className: 'player-wave hidden' },
-      el('canvas', { title: 'Drag the start or end of the clip; let go to apply (↶ undoes). Wheel or pinch to zoom, Shift+wheel to scroll' }),
+      el('canvas', { title: 'Drag the start or end of the clip; drag across the inside to silence that stretch (a cough, a laugh). ↶ undoes. Wheel or pinch to zoom, Shift+wheel to scroll' }),
       el('div', { className: 'player-wave-tools' },
         el('button', { type: 'button', className: 'btn btn--ghost wave-zoom-in', textContent: '🔍 In', title: 'Zoom in on the start of the clip' }),
         el('button', { type: 'button', className: 'btn btn--ghost wave-zoom-out', textContent: '🔍 Out', title: 'Zoom in on the end of the clip' }),
@@ -4081,7 +4081,7 @@ function playerToggle(forcePlay) {
 /** The current clip again, from the start (then carries on as usual). */
 // ---- Waveform with crop handles (review player) ----------------------------------
 
-const wave = { data: null, clip: null, drag: null, cut: null, raf: 0, zoom: null };  // zoom: [from, to] seconds, or null = all
+const wave = { data: null, clip: null, drag: null, cut: null, raf: 0, zoom: null, select: null, pending: null };  // zoom: [from, to] seconds, or null = all
 const WAVE_BINS = 4000;  // detail fetched: ~1 ms per bar, enough to zoom in close
 
 /** Fetch the waveform around the clip now playing and draw it (review player only). */
@@ -4156,6 +4156,16 @@ function drawWave() {
   }
   const label = player.box.querySelector('.wave-zoom-label');
   label.textContent = wave.zoom ? `zoomed: ${(to - from).toFixed(2)} s shown` : '';
+  // Silenced stretches (dark red) and the one being selected (red)
+  (wave.data.silence || []).forEach(([a, b]) => {
+    g.fillStyle = 'rgba(127, 29, 29, 0.75)';
+    g.fillRect(x(a), 0, Math.max(1, x(b) - x(a)), h);
+  });
+  const sel = wave.select ? [wave.select.from, wave.select.to] : wave.pending;
+  if (sel) {
+    g.fillStyle = 'rgba(239, 68, 68, 0.35)';
+    g.fillRect(x(Math.min(...sel)), 0, Math.abs(x(sel[1]) - x(sel[0])), h);
+  }
   // Where the clip was first cut (faint), and the trim handles (in and out points) now
   g.strokeStyle = 'rgba(255,255,255,0.18)';
   g.setLineDash([2, 3]);
@@ -4240,7 +4250,21 @@ function setupWaveDrag() {
     const px = e.offsetX;
     const near = [wave.cut.start, wave.cut.end].map((tt) => Math.abs(x(tt) - px));
     const k = near[0] <= near[1] ? 0 : 1;
-    if (near[k] > 28) return;  // grab a handle, not anywhere
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    if (near[k] > 28) {
+      // Away from the handles: select a stretch inside the clip to silence
+      const { t } = waveGeometry();
+      const at = t(px);
+      if (at <= wave.cut.start || at >= wave.cut.end) return;
+      wave.select = { from: at, to: at };
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* fine */ }
+      clearTimeout(player.timer);
+      player.audio.pause();
+      e.preventDefault();
+      e.stopPropagation();
+      drawWave();
+      return;
+    }
     wave.drag = k;
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* keeps working without capture */ }
     clearTimeout(player.timer);
@@ -4250,6 +4274,12 @@ function setupWaveDrag() {
     drawWave();
   });
   canvas.addEventListener('pointermove', (e) => {
+    if (wave.select) {
+      const { t } = waveGeometry();
+      wave.select.to = Math.min(wave.cut.end, Math.max(wave.cut.start, t(e.offsetX)));
+      drawWave();
+      return;
+    }
     if (wave.drag == null) return;
     const { t } = waveGeometry();
     const time = Math.min(wave.data.viewEnd, Math.max(wave.data.viewStart, t(e.offsetX)));
@@ -4258,6 +4288,24 @@ function setupWaveDrag() {
     drawWave();
   });
   const release = async () => {
+    if (wave.select) {
+      const sel = wave.select;
+      wave.select = null;
+      const [a, b] = [Math.min(sel.from, sel.to), Math.max(sel.from, sel.to)];
+      if (b - a < 0.02) { drawWave(); return; }  // a click, not a selection
+      // That stretch becomes silence (words no longer heard leave the text), then hear it
+      const clip = wave.clip;
+      const row = document.querySelector(`.clip[data-key="${CSS.escape(clipKey(clip))}"]`);
+      wave.pending = [a, b];
+      drawWave();
+      player.trimming = true;
+      const ok = await trimClip(clip, { silence: [Math.round(a * 1000) / 1000, Math.round(b * 1000) / 1000] },
+        () => row && row.rerender && row.rerender(), false);
+      player.trimming = false;
+      wave.pending = null;
+      if (ok) playerGo(player.index); else loadWave(clip);
+      return;
+    }
     if (wave.drag == null) return;
     wave.drag = null;
     const clip = wave.clip;

@@ -245,6 +245,7 @@ class TrimRequest(BaseModel):
     text: Optional[str] = None  # the words as shown in the review (with corrections)
     start: Optional[float] = None  # an exact cut (dragged handles): start and end, in the file
     end: Optional[float] = None
+    silence: Optional[List[float]] = None  # [from, to] in the file: that stretch turned to silence
 
 
 @app.post("/api/voices/{name}/clips/trim")
@@ -252,7 +253,7 @@ async def api_trim_clip(name: str, body: TrimRequest) -> Dict[str, Any]:
     """Trim a clip in the review (and in the dataset, when it's saved)."""
     return await asyncio.to_thread(freeform.trim_clip, store.get(name), body.take, body.index,
                                    body.front, body.back, body.reset, body.text, body.undo,
-                                   body.start, body.end)
+                                   body.start, body.end, body.silence)
 
 
 _EVENTS_LOCK = asyncio.Lock()

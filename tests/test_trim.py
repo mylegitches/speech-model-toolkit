@@ -140,3 +140,42 @@ def test_cropping_only_cuts_the_cleaned_audio(tmp_path):
     assert (take_dir / "audio.light.flac").exists()
     offset = int(0.5 * rate)
     assert np.array_equal(cropped, full[offset: offset + len(cropped)])
+
+
+def test_words_heard_drops_only_words_that_are_gone():
+    from app.voice.freeform import words_heard
+    # someone else's "Hey!" in the middle was silenced
+    assert words_heard("I told you, hey! you never listen.", "I told you you never listen") == "I told you, you never listen."
+    # a mishearing ("lissen") isn't a cut: the word stays as written
+    assert words_heard("You never listen.", "You never lissen") == "You never listen."
+    assert words_heard("Hi there", "") == "Hi there"
+
+
+def test_silencing_a_stretch(take, monkeypatch):
+    import io
+    import wave
+    import numpy as np
+    voice, take_dir = take
+    _audio(take_dir)                       # a tone from 1.0 s to 3.0 s
+    monkeypatch.undo()                     # the fixture fakes clip cutting: use the real one here
+    monkeypatch.setattr(freeform, "_hear", lambda *a: "I know what you did")
+    data = json.loads((take_dir / "take.json").read_text())
+    data["denoise"] = "off"
+    (take_dir / "take.json").write_text(json.dumps(data))
+
+    def pcm():
+        with wave.open(io.BytesIO(freeform.clip_wav(voice, "t1", 0)), "rb") as w:
+            return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16), w.getframerate()
+
+    out = freeform.trim_clip(voice, "t1", 0, silence=[1.5, 2.0])
+    assert out["silence"] == [[1.5, 2.0]] and out["trims"] == 1
+    assert out["text"] == "I know what you did."      # "Yeah," no longer heard
+    audio, rate = pcm()
+    inside = audio[int(0.55 * rate): int(0.95 * rate)]   # 1.55-1.95 s of the file
+    outside = audio[int(0.1 * rate): int(0.4 * rate)]    # 1.1-1.4 s
+    assert np.abs(inside).max() == 0 and np.abs(outside).max() > 5000
+    freeform.trim_clip(voice, "t1", 0, undo=True)
+    audio, rate = pcm()
+    assert np.abs(audio[int(0.55 * rate): int(0.95 * rate)]).max() > 5000   # sound back
+    with pytest.raises(ValueError):
+        freeform.trim_clip(voice, "t1", 0, silence=[1.5, 1.505])           # too short to mean it

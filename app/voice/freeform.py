@@ -756,6 +756,7 @@ def clip_wav(voice: Voice, take_id: str, index: int, level: Optional[str] = None
         first = int(before * CLIP_RATE)
         pcm = pcm[first: first + int(length * CLIP_RATE)]
 
+    pcm = _apply_silence(np.asarray(pcm), segment, CLIP_RATE)
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as out_wav:
         out_wav.setnchannels(1)
@@ -827,6 +828,50 @@ def save_clips(voice: Voice, clips: List[Dict[str, Any]]) -> int:
     return saved
 
 
+def words_heard(text: str, heard: str) -> str:
+    """The text without words that are no longer heard anywhere in the clip (after part of
+    it was silenced). Words Whisper hears differently stay as written (a mishearing, not a
+    cut); only words with nothing heard in their place go."""
+    tokens = text.split()
+    norm = lambda w: re.sub(r"[^a-z0-9]", "", w.lower())
+    mine = [norm(t) for t in tokens]
+    theirs = [norm(w) for w in heard.split() if norm(w)]
+    if not tokens or not theirs:
+        return text
+    gone = set()
+    for op, a1, a2, _b1, _b2 in difflib.SequenceMatcher(None, mine, theirs, autojunk=False).get_opcodes():
+        if op == "delete":
+            gone.update(range(a1, a2))
+    kept = [t for i, t in enumerate(tokens) if i not in gone]
+    if kept and 0 in gone and tokens[0][:1].isupper():
+        kept[0] = kept[0][:1].upper() + kept[0][1:]
+    return " ".join(kept) or text
+
+
+SILENCE_FADE = 0.01  # seconds of fade at each side of a silenced stretch (no click)
+
+
+def _apply_silence(pcm: np.ndarray, seg: Dict[str, Any], rate: int) -> np.ndarray:
+    """The clip with its silenced stretches (seconds in the file) turned to silence."""
+    regions = seg.get("silence") or []
+    if not regions:
+        return pcm
+    out = pcm.astype(np.float32)
+    fade = max(1, int(SILENCE_FADE * rate))
+    for a, b in regions:
+        i, j = int((a - seg["start"]) * rate), int((b - seg["start"]) * rate)
+        i, j = max(0, i), min(len(out), j)
+        if j <= i:
+            continue
+        out[i:j] = 0.0
+        ramp = np.linspace(1.0, 0.0, fade, dtype=np.float32)
+        lo = max(0, i - fade)
+        out[lo:i] *= ramp[-(i - lo):] if i > lo else 1.0
+        hi = min(len(out), j + fade)
+        out[j:hi] *= ramp[::-1][: hi - j] if hi > j else 1.0
+    return np.clip(out, -32768, 32767).astype(np.int16)
+
+
 MIN_TRIMMED = 0.4  # seconds a trimmed clip keeps at least
 
 
@@ -869,7 +914,6 @@ def _hear(voice: Voice, take: Dict[str, Any], take_id: str, index: int) -> str:
     return " ".join(seg.text for seg in segments)
 
 
-MIN_TRIMMED = 0.4  # seconds a trimmed clip keeps at least
 
 
 VIEW_MARGIN = 1.5  # seconds of sound shown (and reachable by dragging) around a clip's first cut
@@ -903,14 +947,15 @@ def clip_view(voice: Voice, take_id: str, index: int, bins: int = 400) -> Dict[s
     return {
         "viewStart": round(lo, 3), "viewEnd": round(lo + len(peaks) * n / rate, 3),
         "start": seg["start"], "end": seg["end"],
-        "firstStart": first["start"], "firstEnd": first["end"],
+        "firstStart": first["start"], "firstEnd": first["end"], "silence": seg.get("silence") or [],
         "peaks": [round(float(min(1.0, v / top)), 3) for v in peaks],
     }
 
 
 def trim_clip(voice: Voice, take_id: str, index: int, front: float = 0.0, back: float = 0.0,
               reset: bool = False, text: Optional[str] = None, undo: bool = False,
-              start: Optional[float] = None, end: Optional[float] = None) -> Dict[str, Any]:
+              start: Optional[float] = None, end: Optional[float] = None,
+              silence: Optional[List[float]] = None) -> Dict[str, Any]:
     """Cut a bit off the start and/or end of a clip (a laugh, another voice); `undo` takes
     back the last trim, `reset` all of them. Words cut off go from the text (`text`: the
     words as shown in the review, with any corrections); undoing brings them back. A clip
@@ -923,23 +968,34 @@ def trim_clip(voice: Voice, take_id: str, index: int, front: float = 0.0, back: 
     if not 0 <= index < len(segments):
         raise KeyError(f"No clip {index}")
     seg = segments[index]
-    history = seg.get("trims") or []  # the clip before each trim: {start, end, text}
+    history = seg.get("trims") or []  # the clip before each change: {start, end, text, silence}
     current = " ".join((text if text is not None else (seg.get("savedText") or seg["text"])).split())
-    hear_front = hear_back = False
+    hear_front = hear_back = hear_all = False
+    snapshot = {"start": seg["start"], "end": seg["end"], "text": current, "silence": list(seg.get("silence") or [])}
     if reset or undo:
         if not history:
             raise ValueError("This clip isn't trimmed")
         before = history[0] if reset else history[-1]
         del history[0 if reset else -1:]
         start, end, words = before["start"], before["end"], before["text"]
+        seg["silence"] = before.get("silence") or []
+    elif silence is not None:
+        # A stretch inside the clip turned to silence (a cough, a laugh, someone else)
+        a, b = sorted(float(v) for v in silence[:2])
+        a, b = max(a, seg["start"]), min(b, seg["end"])
+        if b - a < 0.02:
+            raise ValueError("Select a longer stretch to silence")
+        history.append(snapshot)
+        seg["silence"] = sorted((seg.get("silence") or []) + [[round(a, 3), round(b, 3)]])
+        start, end, words, hear_all = seg["start"], seg["end"], current, True
     elif start is not None and end is not None:
         # Dragged handles: an exact cut, as far as a little past the first one
         lo, hi = _clip_bounds(take_dir, seg)
         start, end = max(lo, float(start)), min(hi, float(end))
         if end - start < MIN_TRIMMED:
             raise ValueError(f"That would leave less than {MIN_TRIMMED:g} s of the clip")
-        first = history[0] if history else {"start": seg["start"], "end": seg["end"], "text": current}
-        history.append({"start": seg["start"], "end": seg["end"], "text": current})
+        first = history[0] if history else snapshot
+        history.append(snapshot)
         if start >= seg["start"] - 0.01 and end <= seg["end"] + 0.01:
             # only cut further: words go from the text as it is now (corrections kept)
             words, hear_front, hear_back = current, start > seg["start"] + 0.01, end < seg["end"] - 0.01
@@ -951,15 +1007,22 @@ def trim_clip(voice: Voice, take_id: str, index: int, front: float = 0.0, back: 
         end = seg["end"] - max(0.0, float(back))
         if end - start < MIN_TRIMMED:
             raise ValueError(f"That would leave less than {MIN_TRIMMED:g} s of the clip")
-        history.append({"start": seg["start"], "end": seg["end"], "text": current})
+        history.append(snapshot)
         words = current
         hear_front, hear_back = front > 0, back > 0
     seg["start"], seg["end"] = round(start, 3), round(end, 3)
+    if not seg.get("silence"):
+        seg.pop("silence", None)
     if history:
         seg["trims"] = history
     else:
         seg.pop("trims", None)
-    if hear_front or hear_back:
+    if hear_all:
+        try:
+            words = words_heard(words, _hear(voice, take, take_id, index))
+        except Exception as err:  # noqa: BLE001 - the silence still counts; the words stay
+            _LOGGER.warning("Couldn't re-check the words of %s/%d after silencing: %s", take_id, index, err)
+    elif hear_front or hear_back:
         try:
             words = words_still_heard(words, _hear(voice, take, take_id, index), hear_front, hear_back)
         except Exception as err:  # noqa: BLE001 - the trim still counts; the words stay
@@ -972,8 +1035,10 @@ def trim_clip(voice: Voice, take_id: str, index: int, front: float = 0.0, back: 
     if seg.get("saved"):
         voice.save_recording(GROUP, f"{take_id}_{index:04d}", words, clip_wav(voice, take_id, index), ".wav")
     _LOGGER.info("Voice %s: clip %s/%d %s (%.2f-%.2f s)", voice.name, take_id, index,
-                 "trims undone" if reset else "last trim undone" if undo else "trimmed", seg["start"], seg["end"])
-    return {"start": seg["start"], "end": seg["end"], "trimmed": bool(history), "trims": len(history), "text": words}
+                 "trims undone" if reset else "last trim undone" if undo else "silenced in part" if hear_all else "trimmed",
+                 seg["start"], seg["end"])
+    return {"start": seg["start"], "end": seg["end"], "trimmed": bool(history), "trims": len(history), "text": words,
+            "silence": seg.get("silence") or []}
 
 
 def set_saved_text(voice: Voice, take_id: str, index: int, text: str) -> str:
