@@ -4128,17 +4128,17 @@ function drawWave() {
     g.fillStyle = inside ? '#22c55e' : '#374151';
     g.fillRect(px, (h - height) / 2, Math.max(1, bar - 0.5), height);
   });
-  // Where the clip was first cut (faint), and the handles of the cut now
+  // Where the clip was first cut (faint), and the trim handles (in and out points) now
   g.strokeStyle = 'rgba(255,255,255,0.18)';
   g.setLineDash([2, 3]);
   [wave.data.firstStart, wave.data.firstEnd].forEach((tt) => { g.beginPath(); g.moveTo(x(tt), 0); g.lineTo(x(tt), h); g.stroke(); });
   g.setLineDash([3, 3]);
   g.lineWidth = 2;
-  g.strokeStyle = '#4ade80';
+  g.strokeStyle = '#ef4444';  // trim handles: red
   [start, end].forEach((tt, k) => {
     const px = x(tt);
     g.beginPath(); g.moveTo(px, 0); g.lineTo(px, h); g.stroke();
-    g.fillStyle = wave.drag === k ? '#bbf7d0' : '#4ade80';  // grip
+    g.fillStyle = wave.drag === k ? '#fca5a5' : '#ef4444';  // grip (lighter while dragged)
     g.fillRect(px - (k ? 0 : 6), h / 2 - 12, 6, 24);
   });
   g.setLineDash([]);
