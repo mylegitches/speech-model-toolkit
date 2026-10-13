@@ -545,3 +545,7 @@ body.trimming { cursor: progress; }
 /* Episodes with nothing in the dataset yet: pending, tinted orange */
 .char-file.char-file--pending > summary { background: rgba(245, 158, 11, 0.12); border-radius: 6px; padding: 0.25rem 0.4rem; }
 .char-file.char-file--pending > summary .char-file-name { color: #fcd34d; }
+
+/* The words in the player: click to fix them */
+.player-subtitle { cursor: text; border-radius: 6px; }
+.player-subtitle:hover { background: rgba(255, 255, 255, 0.06); }

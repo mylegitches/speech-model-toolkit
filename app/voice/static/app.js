@@ -3920,6 +3920,10 @@ function buildPlayer() {
     }
   });
   edit.addEventListener('blur', () => playerSaveEdit());
+  // Click the words to fix them (like ✎ Fix; on a phone a tap does it)
+  screen.querySelector('.player-subtitle').addEventListener('click', () => {
+    if (screen.querySelector('.player-edit').classList.contains('hidden')) playerEdit();
+  });
   player.box = box;
   player.audio = audio;
   setupWaveDrag();
