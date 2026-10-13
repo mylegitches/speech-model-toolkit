@@ -2450,6 +2450,14 @@ async function trimClip(clip, body, redraw, play = true) {
   } finally {
     document.body.classList.remove('trimming');
   }
+  // Trimming a clip means you want it: it's kept (into the dataset) unless you reject it.
+  // Undo / reset leave keep or reject as it was.
+  const trimmed = body.front || body.back || body.start != null;
+  if (trimmed && !clip.saved) {
+    logEvent('kept (trimmed)', clip);
+    await REVIEW.decide(clip, true);
+    if (player.box && player.mode === REVIEW) playerBadge();
+  }
   if (redraw) redraw();
   // Hear the result straight away (the row was redrawn: use its new play button)
   const row = document.querySelector(`.clip[data-key="${CSS.escape(key)}"]`);
