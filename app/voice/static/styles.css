@@ -549,3 +549,10 @@ body.trimming { cursor: progress; }
 /* The words in the player: click to fix them */
 .player-subtitle { cursor: text; border-radius: 6px; }
 .player-subtitle:hover { background: rgba(255, 255, 255, 0.06); }
+
+/* Fix box with a microphone: say the line instead of typing it */
+.player-edit-row { display: flex; gap: 0.4rem; width: 100%; align-items: center; }
+.player-edit-row .player-edit { flex: 1; min-width: 0; }
+.player-edit.hidden + .player-mic { display: none; }
+.player-mic { flex: none; min-height: 0; padding: 0.35rem 0.6rem; font-size: 1.1rem; }
+.player-mic.recording { background: var(--danger); color: #fff; animation: pulse 1.2s ease-in-out infinite; }

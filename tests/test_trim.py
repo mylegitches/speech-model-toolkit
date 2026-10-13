@@ -29,7 +29,7 @@ def take(tmp_path, monkeypatch):
     take_dir.mkdir(parents=True)
     segments = [{"start": 1.0, "end": 3.0, "text": "Yeah, I know what you did."}]
     (take_dir / "take.json").write_text(json.dumps({"state": "done", "segments": segments}))
-    monkeypatch.setattr(freeform, "_hear", lambda *a: "I know what you did")
+    monkeypatch.setattr(freeform, "_hear", lambda *a: "I know what you did.")  # Whisper punctuates
     monkeypatch.setattr(freeform, "clip_wav", lambda *a, **k: b"RIFF")
     return voice, take_dir
 
@@ -102,9 +102,9 @@ def test_drag_to_an_exact_cut_and_back_out_again(take, monkeypatch):
     _audio(take_dir)
     out = freeform.trim_clip(voice, "t1", 0, start=1.3, end=2.9)        # dragged in: "Yeah," goes
     assert (out["start"], out["end"], out["text"]) == (1.3, 2.9, "I know what you did.")
-    monkeypatch.setattr(freeform, "_hear", lambda *a: "Yeah, I know what you did")
+    monkeypatch.setattr(freeform, "_hear", lambda *a: "Yeah, I know what you did.")
     out = freeform.trim_clip(voice, "t1", 0, start=1.0, end=2.9)        # dragged back out
-    assert out["text"] == "Yeah, I know what you did."                  # the words of the first cut
+    assert out["text"] == "Yeah, I know what you did."                  # what's heard again
     out = freeform.trim_clip(voice, "t1", 0, start=-5, end=99)          # never past the margin
     assert (out["start"], out["end"]) == (0.0, 4.5)
     assert freeform.trim_clip(voice, "t1", 0, reset=True)["start"] == 1.0
@@ -179,3 +179,12 @@ def test_silencing_a_stretch(take, monkeypatch):
     assert np.abs(audio[int(0.55 * rate): int(0.95 * rate)]).max() > 5000   # sound back
     with pytest.raises(ValueError):
         freeform.trim_clip(voice, "t1", 0, silence=[1.5, 1.505])           # too short to mean it
+
+
+def test_trim_takes_the_words_now_heard(take, monkeypatch):
+    voice, _ = take
+    # dragged out past a word the text didn't have: the words become what's heard
+    monkeypatch.setattr(freeform, "_hear", lambda *a: "Oh. Yeah, I know what you did, Willie.")
+    out = freeform.trim_clip(voice, "t1", 0, back=0.25)
+    assert out["text"] == "Oh. Yeah, I know what you did, Willie."
+    assert freeform.trim_clip(voice, "t1", 0, undo=True)["text"] == "Yeah, I know what you did."

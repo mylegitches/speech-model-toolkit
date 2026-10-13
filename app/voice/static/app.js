@@ -3831,7 +3831,10 @@ function buildPlayer() {
         el('button', { type: 'button', className: 'btn btn--ghost wave-zoom-all', textContent: 'Whole clip', title: 'Zoom back out' }),
         el('span', { className: 'wave-zoom-label hint' }))),
     el('div', { className: 'player-subtitle' }),
-    el('input', { type: 'text', className: 'player-edit hidden' }));
+    el('div', { className: 'player-edit-row' },
+      el('input', { type: 'text', className: 'player-edit hidden' }),
+      el('button', { type: 'button', className: 'btn player-mic', textContent: '🎤',
+        title: 'Say the line: your words replace the text (click again to stop)' })));
   const bar = el('div', { className: 'player-bar' }, el('div', { className: 'player-fill' }));
   // Left: where you are and what plays; right: the playback buttons, with In/out and Fix right under them
   const controls = el('div', { className: 'player-controls' },
@@ -3919,7 +3922,11 @@ function buildPlayer() {
       box.focus();
     }
   });
-  edit.addEventListener('blur', () => playerSaveEdit());
+  edit.addEventListener('blur', () => { if (!narration.busy) playerSaveEdit(); });
+  // 🎤 while fixing: say the line, the words heard replace the text
+  const mic = screen.querySelector('.player-mic');
+  mic.addEventListener('pointerdown', (e) => e.preventDefault());  // the edit box keeps its focus
+  mic.addEventListener('click', () => narrate(edit, mic));
   // Click the words to fix them (like ✎ Fix; on a phone a tap does it)
   screen.querySelector('.player-subtitle').addEventListener('click', () => {
     if (screen.querySelector('.player-edit').classList.contains('hidden')) playerEdit();
@@ -4395,6 +4402,51 @@ function playerEdit() {
   edit.dataset.index = String(player.index);
   player.box.querySelector('.player-subtitle').classList.add('hidden');
   edit.classList.remove('hidden');
+  edit.focus();
+}
+
+// ---- Narration: speak the words of a clip instead of typing them ---------------------
+
+const narration = { recorder: null, chunks: [], busy: false };
+
+async function narrate(edit, mic) {
+  if (narration.recorder) { narration.recorder.stop(); return; }  // second click: done
+  let stream;
+  try {
+    const device = SMT.get('input', '');  // the microphone chosen in Settings
+    stream = await navigator.mediaDevices.getUserMedia({ audio: device ? { deviceId: { exact: device } } : true });
+  } catch (err) {
+    SMT.showError(SMT.micError ? SMT.micError(err) : `Can't use the microphone: ${err.message}`);
+    return;
+  }
+  narration.busy = true;
+  narration.chunks = [];
+  const recorder = new MediaRecorder(stream);
+  narration.recorder = recorder;
+  recorder.ondataavailable = (e) => { if (e.data.size) narration.chunks.push(e.data); };
+  recorder.onstop = async () => {
+    stream.getTracks().forEach((t) => t.stop());
+    narration.recorder = null;
+    mic.textContent = '…';
+    mic.classList.remove('recording');
+    try {
+      const blob = new Blob(narration.chunks, { type: recorder.mimeType || 'audio/webm' });
+      const res = await fetch(voiceUrl('/narration'), { method: 'POST', body: blob });
+      if (!res.ok) throw new Error(await SMT.errorMessage(res));
+      const { text } = await res.json();
+      edit.value = text;  // the narration replaces the words
+      logEvent('narrated words', player.queue[player.index]?.clip, { words: text });
+    } catch (err) {
+      SMT.showError(err.message);
+    } finally {
+      mic.textContent = '🎤';
+      narration.busy = false;
+      edit.focus();
+    }
+  };
+  recorder.start();
+  mic.textContent = '■';
+  mic.classList.add('recording');
   edit.focus();
 }
 

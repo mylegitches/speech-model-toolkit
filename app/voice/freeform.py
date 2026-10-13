@@ -254,8 +254,8 @@ def split_words(words: List[Any], duration: float, turns: bool = False,
 # ---- Processing ------------------------------------------------------------------
 
 
-def _ffmpeg(args: List[str]) -> bytes:
-    proc = subprocess.run(["ffmpeg", "-v", "error", "-y", *args], capture_output=True)
+def _ffmpeg(args: List[str], stdin: Optional[bytes] = None) -> bytes:
+    proc = subprocess.run(["ffmpeg", "-v", "error", "-y", *args], capture_output=True, input=stdin)
     if proc.returncode != 0:
         stderr = proc.stderr.decode(errors="replace")
         _LOGGER.warning("ffmpeg failed (%s): %s", proc.returncode, stderr.strip()[-500:])
@@ -897,6 +897,19 @@ def words_still_heard(text: str, heard: str, front: bool, back: bool) -> str:
     return " ".join(kept) or text
 
 
+def narration_text(voice: Voice, audio: bytes) -> str:
+    """Words spoken into the microphone (any format ffmpeg reads), for fixing a clip's text."""
+    pcm = _ffmpeg(["-i", "pipe:0", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"], stdin=audio)
+    samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+    if len(samples) < 16000 * 0.3:
+        raise ValueError("Nothing recorded: hold the microphone button a little longer")
+    model_id = _model_for(voice)
+    model = stt._load(model_id)
+    segments, _ = model.transcribe(samples, language=None if model_id.endswith(".en") else voice.language.split("-")[0],
+                                   beam_size=5, condition_on_previous_text=False, vad_filter=True)
+    return " ".join(" ".join(seg.text for seg in segments).split())
+
+
 def _hear(voice: Voice, take: Dict[str, Any], take_id: str, index: int) -> str:
     """What Whisper hears in one clip on its own."""
     import io as _io
@@ -1023,8 +1036,11 @@ def trim_clip(voice: Voice, take_id: str, index: int, front: float = 0.0, back: 
         except Exception as err:  # noqa: BLE001 - the silence still counts; the words stay
             _LOGGER.warning("Couldn't re-check the words of %s/%d after silencing: %s", take_id, index, err)
     elif hear_front or hear_back:
+        # Moved edges: the words become what Whisper now hears in the clip (all of them), so
+        # the text matches the trimmed audio; undo brings the earlier words back
         try:
-            words = words_still_heard(words, _hear(voice, take, take_id, index), hear_front, hear_back)
+            heard = " ".join(_hear(voice, take, take_id, index).split())
+            words = heard or words_still_heard(words, heard, hear_front, hear_back)
         except Exception as err:  # noqa: BLE001 - the trim still counts; the words stay
             _LOGGER.warning("Couldn't re-check the words of %s/%d after a trim: %s", take_id, index, err)
     if seg.get("saved"):

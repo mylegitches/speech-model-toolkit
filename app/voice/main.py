@@ -281,6 +281,18 @@ async def api_events(name: str, request: Request) -> Dict[str, Any]:
     return {"logged": len(events)}
 
 
+@app.post("/api/voices/{name}/narration")
+async def api_narration(name: str, request: Request) -> Dict[str, Any]:
+    """Speech from the microphone (the Fix box's 🎤) as text."""
+    audio = await request.body()
+    if len(audio) > 20 * 2**20:
+        raise ValueError("That recording is too long")
+    text = await asyncio.to_thread(freeform.narration_text, store.get(name), audio)
+    if not text:
+        raise ValueError("No words heard: try again a little louder")
+    return {"text": text}
+
+
 class CopyRequest(BaseModel):
     name: str
 
