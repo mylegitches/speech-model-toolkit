@@ -2199,8 +2199,10 @@ function renderCharacter() {
       all.title = `${sectionAllTicked() ? 'Untick' : 'Tick'} every ${title.toLowerCase()} clip not saved yet`;
     };
     all.addEventListener('click', async () => {
+      if (all.disabled) return;
       const on = !sectionAllTicked();
       all.disabled = true;
+      all.textContent = on ? `Saving ${clips.filter((c) => !c.saved).length}…` : `Removing ${clips.filter((c) => c.saved).length}…`;
       logEvent(on ? 'tick all (section)' : 'untick all (section)', null, { section: title, clips: clips.length });
       if (await keepClips(clips, on)) openCharacter(name, true);
       all.disabled = false;
@@ -2245,7 +2247,7 @@ function renderCharacter() {
       const fresh = !possibleSection && !reviewed.has(fileClips[0].take);
       details.open = shown.has(id) ? wasOpen.has(id) : fresh;
       if (details.open) charUi.open.add(id);
-      const label = el('span', { className: 'char-file-name', textContent: fileSummary(fileClips, ticked) });
+      const label = el('span', { className: 'char-file-name', textContent: fileSummary(fileClips) });
       const fileAllTicked = () => fileClips.every((c) => c.saved || ticked(c));
       const tickToggle = el('button', { type: 'button', className: 'btn btn--ghost' });
       const updateTick = () => {
@@ -2255,7 +2257,7 @@ function renderCharacter() {
           : 'Tick every clip of this file';
       };
       const refresh = () => {
-        label.textContent = fileSummary(fileClips, ticked);
+        label.textContent = fileSummary(fileClips);
         updateTick();
         sectionUpdaters.forEach((f) => f());
         updateSave();
@@ -2265,8 +2267,15 @@ function renderCharacter() {
       const tickFile = (on) => async (e) => {
         e.preventDefault();  // a button in the summary would otherwise open/close the file
         e.stopPropagation();
+        if (tickToggle.disabled) return;  // already on it
         logEvent(on ? 'tick all (episode)' : 'untick all (episode)', null, { file: fileClips[0].file, clips: fileClips.length });
-        if (!await keepClips(fileClips, on)) return;
+        // Saving takes a moment (each clip is cut and cleaned): say so, and no second click
+        const n = fileClips.filter((c) => Boolean(c.saved) !== on).length;
+        tickToggle.disabled = true;
+        tickToggle.textContent = on ? `Saving ${n}…` : `Removing ${n}…`;
+        const ok = await keepClips(fileClips, on);
+        tickToggle.disabled = false;
+        if (!ok) { updateTick(); return; }
         const list = details.querySelector('.clips');
         if (list) {
           // Redraw this file's rows in place (no jump in the list)
@@ -2348,11 +2357,10 @@ function expandToggle(container, what) {
 }
 
 /** "S01E03.mkv · 12 clips · 5 saved · 4 ticked" */
-function fileSummary(clips, ticked) {
+function fileSummary(clips) {
   const saved = clips.filter((c) => c.saved).length;
-  const n = clips.filter((c) => !c.saved && ticked(c)).length;
-  return [clips[0].file, `${clips.length} clip${clips.length === 1 ? '' : 's'}`, saved && `${saved} saved`,
-    `${n} ticked`].filter(Boolean).join(' · ');
+  return [clips[0].file, `${clips.length} clip${clips.length === 1 ? '' : 's'}`,
+    saved ? `${saved} in the dataset` : 'none in the dataset'].join(' · ');
 }
 
 /** Tick all / Untick all: these clips straight into (or out of) the dataset. */

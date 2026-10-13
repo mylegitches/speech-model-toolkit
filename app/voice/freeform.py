@@ -725,12 +725,19 @@ def save_clips(voice: Voice, clips: List[Dict[str, Any]]) -> int:
             raise RuntimeError("That file is still being processed; wait for it to finish")
         take = _read(take_dir)
         segments = take["segments"]
+        todo = []
         for item in items:
             index = int(item.get("index", -1))
             text = " ".join(str(item.get("text", "")).split())
-            if not 0 <= index < len(segments) or not text:
-                continue
-            voice.save_recording(GROUP, f"{take_id}_{index:04d}", text, clip_wav(voice, take_id, index), ".wav")
+            if 0 <= index < len(segments) and text:
+                todo.append((index, text))
+        # Cutting and cleaning each clip is an ffmpeg run: four at a time (Tick all on an
+        # episode of 100+ clips took ~10 s one by one)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            audio = list(pool.map(lambda job: clip_wav(voice, take_id, job[0]), todo))
+        for (index, text), wav in zip(todo, audio):
+            voice.save_recording(GROUP, f"{take_id}_{index:04d}", text, wav, ".wav")
             segments[index]["saved"] = True
             segments[index]["savedText"] = text  # as corrected in the review
             saved += 1
