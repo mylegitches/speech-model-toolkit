@@ -4,7 +4,7 @@ One web app for training your own speech models locally, with a tab for each:
 
 - **Wake Word**: type a phrase, then train an [openWakeWord](https://github.com/dscripka/openWakeWord) model (`.onnx` + `.tflite`) and test it live with your microphone.
 - **Voice**: record yourself (or upload a dataset), then train a [Piper](https://github.com/OHF-Voice/piper1-gpl) text-to-speech voice for Home Assistant.
-- **Test Lab**: say your wake word and hear your voice answer, optionally with an AI model answering your questions.
+- **Test Lab**: say your wake word and hear your voice answer, optionally with an AI model answering your questions. Or switch on Repeat mode to have it say exactly what you type, set pauses after punctuation (and `<break time="1s"/>` tags), and write multi-character scripts to play or download as one recording.
 - **Settings**: AI connections, speech recognition and audio devices.
 
 No coding required. Everything runs in one Docker container on your machine; the only thing that ever leaves it is what you send to an AI provider you configure yourself.

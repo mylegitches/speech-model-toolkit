@@ -95,6 +95,7 @@ class LabSession:
         self.state = "idle"
         self.voice = tts.DEFAULT_VOICE
         self.speed = 100
+        self.repeat = False  # Repeat mode: speak what was said or typed, word for word (no AI)
         self.wakeword = ""
         self.detector: Any = None
         self.history: List[Dict[str, str]] = []
@@ -158,6 +159,7 @@ class LabSession:
         self.wakeword = str(start.get("wakeword") or "")
         self.voice = str(start.get("voice") or tts.DEFAULT_VOICE)
         self.speed = tts.clamp_speed(start.get("speed", 100))
+        self.repeat = bool(start.get("repeat"))
         onnx_path = ww.find_model(self.wakeword)
         if onnx_path is None:
             raise ValueError(f"Wake word model '{self.wakeword}' not found. Was it deleted? Reload the page.")
@@ -190,6 +192,8 @@ class LabSession:
                 self.speed = tts.clamp_speed(message["speed"])
         elif kind == "speed":
             self.speed = tts.clamp_speed(message.get("speed"))
+        elif kind == "repeat":
+            self.repeat = bool(message.get("on"))
         elif kind == "ask" and self.state == "listening":
             # Typed question during a session: shares this conversation's history
             question = str(message.get("text") or "").strip()[:2000]
@@ -224,7 +228,7 @@ class LabSession:
     async def on_wake(self) -> None:
         _LOGGER.info("Test Lab: wake word %s detected", self.wakeword)
         await self.set_state("heard", "Wake word detected")
-        if settings_store.active_connection(self.settings) is None:
+        if not self.repeat and settings_store.active_connection(self.settings) is None:
             self.spawn(self.speak(self.settings["assistant"]["fixedReply"]))
             return
 
@@ -293,6 +297,10 @@ class LabSession:
         await self.answer_text(question)
 
     async def answer_text(self, question: str) -> None:
+        if self.repeat:
+            # Repeat mode: say it back, word for word
+            await self.speak(question)
+            return
         await self.set_state("thinking", "Asking the AI…")
         try:
             reply = await ask_ai(self.history, question)

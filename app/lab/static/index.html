@@ -39,6 +39,7 @@
         <span id="mode-text" class="hint"></span>
         <a href="../#settings" target="_top" class="hint">Change in Settings</a>
       </div>
+      <label class="switch"><input type="checkbox" id="repeat-mode" /><span>Repeat mode: speak what I type or say, word for word (no AI)</span></label>
     </section>
 
     <!-- 2. Listen -->
@@ -78,6 +79,42 @@
         <button type="submit" class="btn btn--secondary">Send</button>
       </form>
       <audio id="player" class="hidden"></audio>
+    </section>
+
+    <!-- 4. Pauses -->
+    <section class="card">
+      <div class="card-head">
+        <h2><span class="step">4</span> Pauses</h2>
+        <span class="row">
+          <button type="button" id="pause-preview" class="btn btn--secondary">▶ Preview</button>
+          <button type="button" id="pause-reset" class="btn btn--ghost">Reset defaults</button>
+        </span>
+      </div>
+      <p class="hint">Extra silence after punctuation, on top of the voice's own pauses, for everything spoken here (replies, Repeat mode, scripts).
+        Anywhere in the text, <code>&lt;break time="1s"/&gt;</code> or <code>&lt;break time="250ms"/&gt;</code> adds a pause of exactly that length; it's never read out.
+        These pauses only apply where this app speaks, not in Home Assistant or Hermes.</p>
+      <label class="switch"><input type="checkbox" id="pause-enabled" /><span>Custom pauses after punctuation</span></label>
+      <div id="pause-sliders" class="pause-sliders"></div>
+      <p class="hint">Commas, semicolons and colons are <strong>experimental</strong>: to pause there, the sentence is split and each part is spoken on its own, so the voice drops at the split. 0 = off.</p>
+    </section>
+
+    <!-- 5. Script -->
+    <section class="card">
+      <div class="card-head">
+        <h2><span class="step">5</span> Script</h2>
+        <span class="row">
+          <button type="button" id="script-play" class="btn btn--primary">▶ Play all</button>
+          <a id="script-download" class="btn btn--secondary dl-btn hidden" download="script.wav">⬇ .wav</a>
+        </span>
+      </div>
+      <p class="hint">A conversation: give each line a character (voice) and its words. <strong>Pause after</strong> sets the gap before the next line; ⚙ sets that line's own pauses after punctuation. ▶ on a line plays just that line.</p>
+      <div id="script-lines" class="script-lines"></div>
+      <div class="row">
+        <button type="button" id="script-add" class="btn btn--secondary">＋ Add line</button>
+        <button type="button" id="script-clear" class="btn btn--ghost">Clear</button>
+        <span id="script-status" class="hint"></span>
+      </div>
+      <audio id="script-player" class="hidden"></audio>
     </section>
   </div>
 

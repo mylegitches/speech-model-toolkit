@@ -21,7 +21,7 @@ import urllib.request
 from collections import deque
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Callable, Deque, Dict, List, Optional
+from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 
 from ..errors import explain_failure
 from .voices import AUDIO_EXTENSIONS, Voice
@@ -78,6 +78,26 @@ if hasattr(torch.serialization, "add_safe_globals"):
     torch.serialization.add_safe_globals(
         [pathlib.PosixPath, pathlib.PurePosixPath, pathlib.PureWindowsPath]
     )
+"""
+
+# Speaks events (speech and silence) with one voice; reads JSON on stdin, writes the
+# sample rate (4 bytes, little endian) then 16-bit mono PCM to stdout.
+_EVENTS_SCRIPT = r"""
+import json, sys
+from piper import PiperVoice, SynthesisConfig
+request = json.load(sys.stdin)
+voice = PiperVoice.load(request["model"])
+config = SynthesisConfig(length_scale=request.get("length_scale"))
+rate = voice.config.sample_rate
+out = sys.stdout.buffer
+out.write(int(rate).to_bytes(4, "little"))
+for kind, value in request["events"]:
+    if kind == "pause":
+        out.write(bytes(2 * int(rate * value / 1000)))  # 16-bit silence
+    else:
+        for chunk in voice.synthesize(value, syn_config=config):
+            out.write(chunk.audio_int16_bytes)
+out.flush()
 """
 
 # Runs "python3 -m piper.train" the way piper1-gpl's fine-tuning expects:
@@ -567,6 +587,21 @@ class TrainingManager:
             raise FileNotFoundError("Voice not exported")
 
         return await self.synthesize(model_paths[0], text, length_scale)
+
+    async def synthesize_events(self, model_path: Path, events: List[Any],
+                                length_scale: Optional[float] = None) -> Tuple[bytes, int]:
+        """Speak a list of ("speech", text) / ("pause", ms) events with one Piper voice,
+        loaded once: 16-bit mono PCM and its sample rate (silence inserted at that rate)."""
+        request = json.dumps({"model": str(model_path), "length_scale": length_scale, "events": events})
+        proc = await asyncio.create_subprocess_exec(
+            self.python, "-c", _EVENTS_SCRIPT,
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate(request.encode())
+        if proc.returncode != 0:
+            raise RuntimeError(stderr.decode(errors="replace")[-500:])
+        rate = int.from_bytes(stdout[:4], "little")
+        return stdout[4:], rate
 
     async def synthesize(self, model_path: Path, text: str, length_scale: Optional[float] = None) -> bytes:
         """Synthesize text with any Piper .onnx voice (next to its .onnx.json); returns WAV."""

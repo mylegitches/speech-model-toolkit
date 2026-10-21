@@ -223,6 +223,12 @@ Try your wake word and voice together, as a real assistant.
 
 The status pill shows what it's doing: *Listening → Heard it! → Your turn → Transcribing → Thinking → Speaking*.
 
+**Repeat mode** (switch in 1. Setup): instead of asking the AI, the voice says back exactly what you type, or what you say after the wake word. Good for hearing how a voice says particular lines.
+
+**4. Pauses:** extra silence after punctuation, on top of the voice's own pauses, for everything spoken in the Test Lab. Switch on **Custom pauses after punctuation** and set a slider per mark: period, question mark, exclamation mark, ellipsis (`…` or `...`, one pause, not three), and paragraph breaks (an empty line). **Preview** speaks a test passage; **Reset defaults** puts the sliders back. Commas, semicolons and colons are experimental and off by default: to pause there the sentence is split, so the voice drops its tone at the split. Anywhere in the text, `<break time="1s"/>` or `<break time="250ms"/>` adds a pause of exactly that length (up to 10 s), whether custom pauses are on or not; it's never read out. Runs like `?!` give one pause (the longest), decimals like `3.14` and abbreviations like `Dr.` don't count as sentence ends. These pauses happen where this app speaks; Home Assistant and Hermes run Piper themselves, so they don't get them.
+
+**5. Script:** write a conversation. Each line has a **character** (any of your voices, or the default) and its words; **＋ Add line** adds the next line, alternating between the last two characters so a back-and-forth is quick to write. **Pause after** sets the gap before the next line. **⚙** opens that line's own pause sliders ("This line has its own pauses"), to time it differently from the rest. **▶** on a line plays just that line, **▶ Play all** plays the whole conversation as one recording (the line being spoken is highlighted), **⬇ .wav** downloads it, ↑ ↓ reorder and 🗑 deletes. Break tags work in lines too. Each voice speaks at its own remembered speed. The script is kept in this browser.
+
 ---
 
 ## 8. Settings

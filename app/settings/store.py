@@ -50,6 +50,12 @@ DEFAULTS: Dict[str, Any] = {
         "autoName": False,     # rename untouched "Person N" cards when the AI is sure
         "autoMerge": False,    # merge cards the AI is sure are one character (voices alike)
     },
+    # Test Lab speech: extra pauses after punctuation (see app/lab/pauses.py)
+    "pauses": {
+        "enabled": False,
+        "period": 350, "question": 450, "exclamation": 400, "ellipsis": 950, "paragraph": 650,
+        "comma": 0, "semicolon": 0, "colon": 0,
+    },
     "audio": {
         "threshold": 0.5,
         "cooldownSec": 2.0,
@@ -171,6 +177,9 @@ def update(values: Dict[str, Any]) -> Dict[str, Any]:
                 connections.append(_clean_connection(new, existing))
             current["connections"] = connections
 
+        if isinstance(values.get("pauses"), dict):
+            from ..lab.pauses import clean_settings
+            current["pauses"] = clean_settings({**current["pauses"], **values["pauses"]})
         for section in ("assistant", "speech", "identify", "audio"):
             if isinstance(values.get(section), dict):
                 current[section].update(
