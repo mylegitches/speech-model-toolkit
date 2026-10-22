@@ -38,7 +38,7 @@
 }
 
 /* Tester */
-#mic-btn.listening { background: var(--danger); animation: pulse 1s infinite; }
+#mic-btn.listening { background: var(--danger-fill); animation: pulse 1s infinite; }
 
 /* 4. Your wake words */
 .model-library { display: flex; flex-direction: column; gap: 0.5rem; }
