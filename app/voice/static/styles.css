@@ -1,7 +1,7 @@
 /* Voice trainer widgets. Common styles are in /static/theme.css. */
 
 .btn--record { background: #7f1d1d; border-color: var(--danger); }
-.btn--record.recording { background: var(--danger); animation: pulse 1s infinite; }
+.btn--record.recording { background: var(--danger-fill); animation: pulse 1s infinite; }
 
 .new-voice { display: flex; flex-direction: column; gap: 0.9rem; padding-top: 0.5rem; }
 
@@ -275,7 +275,7 @@ html[data-view="voices"] #device-banner { display: none !important; }
 .player--marked .player-screen { outline: 2px solid var(--danger); }
 .player-badge { position: absolute; top: 0.5rem; right: 0.6rem; color: #fff; font-size: 0.72rem;
   padding: 0.1rem 0.5rem; border-radius: 99px; }
-.player-badge--bad { background: rgba(239, 68, 68, 0.85); }
+.player-badge--bad { background: rgba(220, 38, 38, 0.85); }
 .player-badge--ok { background: rgba(9, 91, 27, 0.9); }
 .player-from { padding-right: 9rem; }
 .player--marked .player-subtitle { text-decoration: line-through; opacity: 0.6; }
@@ -555,4 +555,4 @@ body.trimming { cursor: progress; }
 .player-edit-row .player-edit { flex: 1; min-width: 0; }
 .player-edit.hidden + .player-mic { display: none; }
 .player-mic { flex: none; min-height: 0; padding: 0.35rem 0.6rem; font-size: 1.1rem; }
-.player-mic.recording { background: var(--danger); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
+.player-mic.recording { background: var(--danger-fill); color: #fff; animation: pulse 1.2s ease-in-out infinite; }

@@ -3,7 +3,7 @@
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .mode { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 
-#start-btn.listening { background: var(--danger); }
+#start-btn.listening { background: var(--danger-fill); }
 
 /* Conversation */
 .log { display: flex; flex-direction: column; gap: 0.6rem; max-height: 28rem; overflow-y: auto; }
