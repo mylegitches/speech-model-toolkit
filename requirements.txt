@@ -37,3 +37,11 @@ onnxruntime==1.18.0
 # Test Lab: AI provider calls and local speech-to-text
 httpx>=0.27,<1
 faster-whisper==1.0.3
+
+# Voice Room tab (app/agents): characters talking in rooms
+piper-tts==1.8.0
+pathvalidate>=3,<4
+sqlalchemy[asyncio]>=2.0.30,<3
+aiosqlite>=0.20
+alembic>=1.13
+openai>=1.40

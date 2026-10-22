@@ -11,6 +11,7 @@ Step-by-step instructions for everything the app does. For installation details 
 5. [Train the voice](#5-train-the-voice)
 6. [Listen and install in Home Assistant](#6-listen-and-install-in-home-assistant)
 7. [Test Lab: wake word + voice + AI](#7-test-lab-wake-word--voice--ai)
+   - [Voice Room: characters talking to each other](#voice-room-characters-talking-to-each-other)
 8. [Settings](#8-settings)
 9. [Using it on your phone](#9-using-it-on-your-phone)
 10. [Troubleshooting](#10-troubleshooting)
@@ -230,6 +231,16 @@ The status pill shows what it's doing: *Listening → Heard it! → Your turn �
 **5. Script:** write a conversation. Each line has a **character** (any of your voices, or the default) and its words; **＋ Add line** adds the next line, alternating between the last two characters so a back-and-forth is quick to write. **Pause after** sets the gap before the next line. **⚙** opens that line's own pause sliders ("This line has its own pauses"), to time it differently from the rest. **▶** on a line plays just that line, **▶ Play all** plays the whole conversation as one recording (the line being spoken is highlighted), **⬇ .wav** downloads it, ↑ ↓ reorder and 🗑 deletes. Break tags work in lines too. Each voice speaks at its own remembered speed. The script is kept in this browser.
 
 ---
+
+### Voice Room: characters talking to each other
+
+The **Voice Room** tab (built from [voice-agent-freestyle](https://github.com/mylegitches/voice-agent-freestyle)) lets characters hold an ongoing spoken conversation, with you able to jump in.
+
+1. **Characters:** make at least two. Each has a name, a **voice**, a personality (its system prompt), how eager it is to talk, how long its turns can be, and a colour. **Preview** speaks with the voice. The voices are your trained voices (the newest version of each), the stock default voice, and any `.onnx` + `.onnx.json` pair you upload to a character. A remote Wyoming Piper server can be added with `VOICE_ROOM_PIPER_HOST` (and `_PORT`) in `.env`.
+2. **Rooms:** create a room, pick its cast and their order, and optionally a **safe word** that ends the conversation when said.
+3. **Live room:** enter the room, type a topic and press Play. The characters take turns: each bids for the next turn, and the most eager (or the one addressed by name) speaks. Type or hold the microphone to interrupt; playback stops while you're heard. Pause after the current line, stop, open the bid debugger, or download the transcript.
+
+It uses the active AI connection from **Settings → AI connections** (any provider; Ollama Cloud with minimax-m3 works well) and the Whisper model from **Settings → Speech recognition**. Its data (characters, rooms, transcripts, uploaded voices) is kept in `data/agents/`.
 
 ## 8. Settings
 

@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import errors
+from .agents import main as agents
 from .lab import main as lab
 from .settings import main as settings
 from .settings import providers
@@ -46,6 +47,7 @@ async def lifespan(_app: FastAPI):
     # Mounted sub-apps don't get lifespan events, so run their startup here
     await wakeword.startup()
     await voice.startup()
+    await agents.startup()
     device = voice.trainer.device
     _LOGGER.info(
         "SpeechModelToolkit ready. Voice training: %s",
@@ -53,6 +55,7 @@ async def lifespan(_app: FastAPI):
         if device.get("ok") else f"NOT AVAILABLE ({device.get('problem', 'unknown')[:200]})",
     )
     yield
+    await agents.shutdown()
 
 
 app = FastAPI(
@@ -128,5 +131,6 @@ async def favicon() -> FileResponse:
 app.mount("/wakeword", wakeword.app, name="wakeword")
 app.mount("/voice", voice.app, name="voice")
 app.mount("/lab", lab.app, name="lab")
+app.mount("/agents", agents.app, name="agents")
 app.mount("/settings", settings.app, name="settings")
 app.mount("/static", StaticFiles(directory=_DIR / "static"), name="static")

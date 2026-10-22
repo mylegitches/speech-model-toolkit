@@ -4,6 +4,16 @@
 # Python environments inside this one image:
 #   system Python     web app + openWakeWord training (torch 2.2, numpy 1.26)
 #   /opt/piper-venv   piper1-gpl training, run as a subprocess ($PIPER_PYTHON)
+#   app/agents/web    the Voice Room screens (React), built in the stage below
+
+# ── Voice Room screens (React → static files) ──────────────────────────────────
+FROM node:20-slim AS agents-web
+WORKDIR /web
+COPY app/agents/web/package.json app/agents/web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY app/agents/web/ ./
+RUN npm run build
+
 FROM python:3.11-slim-bookworm
 
 # git (clones), build-essential/cmake/ninja (piper1-gpl + piper-phonemize
@@ -78,6 +88,7 @@ COPY export_dataset/ /app/export_dataset/
 COPY prompts/ /app/prompts/
 COPY scripts/ /app/scripts/
 COPY app/ /app/app/
+COPY --from=agents-web /web/dist /app/app/agents/web/dist
 
 ENV PYTHONUNBUFFERED=1 \
     WAKEWORD_DATA_DIR=/data/wakeword \

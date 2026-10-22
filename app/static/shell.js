@@ -1,6 +1,6 @@
 /* Tab switching (hash routing) and the status shown on the Home tab. */
 
-const TABS = ['home', 'wakeword', 'dataset', 'train', 'voices', 'lab', 'settings'];
+const TABS = ['home', 'wakeword', 'dataset', 'train', 'voices', 'lab', 'agents', 'settings'];
 
 function showTab(name) {
   if (name === 'voice') name = 'dataset';  // old links to the single Voice tab

@@ -5,3 +5,5 @@
 !scripts/
 !requirements.txt
 **/__pycache__
+**/node_modules
+app/agents/web/dist
