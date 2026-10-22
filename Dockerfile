@@ -1,4 +1,4 @@
-# Speech Model Toolkit: wake word (openWakeWord) + voice (Piper) training.
+# SpeechModelToolkit: wake word (openWakeWord) + voice (Piper) training.
 #
 # The two trainers need incompatible PyTorch stacks, so they live in separate
 # Python environments inside this one image:

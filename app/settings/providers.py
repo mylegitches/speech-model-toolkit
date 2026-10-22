@@ -153,7 +153,7 @@ def _headers(conn: Dict[str, Any], provider: Provider) -> Dict[str, str]:
 
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     if provider.id == "openrouter":
-        headers["X-Title"] = "Speech Model Toolkit"
+        headers["X-Title"] = "SpeechModelToolkit"
     return headers
 
 

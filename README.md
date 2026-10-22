@@ -1,4 +1,4 @@
-# Speech Model Toolkit
+# SpeechModelToolkit
 
 One web app for training your own speech models locally, with a tab for each:
 

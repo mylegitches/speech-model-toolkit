@@ -1,4 +1,4 @@
-# Speech Model Toolkit: Full Feature Writeup
+# SpeechModelToolkit: Full Feature Writeup
 
 > Source material for promo videos, user guides, posts and portfolio pages.
 > Everything below describes what the software actually does today; numbers
@@ -8,7 +8,7 @@
 
 ## In one sentence
 
-**Speech Model Toolkit is a self-hosted web app that lets anyone train their own custom wake word and clone a voice for text-to-speech, then try both together in a voice assistant, all running locally in one Docker container with no coding.**
+**SpeechModelToolkit is a self-hosted web app that lets anyone train their own custom wake word and clone a voice for text-to-speech, then try both together in a voice assistant, all running locally in one Docker container with no coding.**
 
 ## Short pitches
 
@@ -17,7 +17,7 @@
   - "Your voice. Your wake word. Your machine."
   - "Build a voice assistant that sounds like you, without sending a word to the cloud."
   - "From a phrase and a few minutes of speech to a working voice assistant."
-- **Elevator pitch (30 s):** Smart home voice assistants make you use their wake words and their voices. Speech Model Toolkit lets you train both yourself. Type a phrase and it trains a wake word detector. Read some sentences, talk freely, or import a video, and it fine-tunes a text-to-speech voice that sounds like you, automatically picking the best starting voice. Then the Test Lab turns them into a working assistant: say your wake word, ask a question, and hear the answer in your own voice, optionally powered by any AI model you choose. Everything runs in one Docker container on your own hardware, and the results drop straight into Home Assistant.
+- **Elevator pitch (30 s):** Smart home voice assistants make you use their wake words and their voices. SpeechModelToolkit lets you train both yourself. Type a phrase and it trains a wake word detector. Read some sentences, talk freely, or import a video, and it fine-tunes a text-to-speech voice that sounds like you, automatically picking the best starting voice. Then the Test Lab turns them into a working assistant: say your wake word, ask a question, and hear the answer in your own voice, optionally powered by any AI model you choose. Everything runs in one Docker container on your own hardware, and the results drop straight into Home Assistant.
 
 ---
 
@@ -28,7 +28,7 @@
 - Nothing let you *try* a custom wake word and a custom voice together as an assistant before deploying them.
 - Cloud voice services require sending your voice and conversations to someone else's servers.
 
-**Speech Model Toolkit turns all of that into a guided web interface**, with privacy by default: training, transcription, speaker recognition and speech synthesis all run locally. The only thing that ever leaves the machine is what you choose to send to an AI provider you configure yourself.
+**SpeechModelToolkit turns all of that into a guided web interface**, with privacy by default: training, transcription, speaker recognition and speech synthesis all run locally. The only thing that ever leaves the machine is what you choose to send to an AI provider you configure yourself.
 
 ## Who it's for
 
@@ -244,7 +244,7 @@ Open the app over HTTPS, choose Add to Home Screen, then record dataset sentence
 5. The movie trick: import video → track choice → "Who do you want?" speaker cards (10 s).
 6. Test Lab payoff: say the wake word, ask a question, the answer comes back in the cloned voice (15 s).
 7. Phone: installed app, bottom tabs (5 s).
-8. Close: *"Local. Private. Open source. Speech Model Toolkit."* + repo link.
+8. Close: *"Local. Private. Open source. SpeechModelToolkit."* + repo link.
 
 ### Screens worth capturing
 

@@ -1,4 +1,4 @@
-# Speech Model Toolkit: User Guide
+# SpeechModelToolkit: User Guide
 
 Step-by-step instructions for everything the app does. For installation details and the technical background see the [README](README.md); for a feature overview see [FULL_WRITEUP.md](FULL_WRITEUP.md).
 

@@ -1,6 +1,6 @@
 {
-  "name": "Speech Model Toolkit",
-  "short_name": "Speech Toolkit",
+  "name": "SpeechModelToolkit",
+  "short_name": "SpeechToolkit",
   "description": "Train wake words and Piper voices, and try them together.",
   "start_url": "../",
   "scope": "../",
