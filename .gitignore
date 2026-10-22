@@ -23,3 +23,4 @@ Thumbs.db
 # Voice Room screens: built by the Docker image
 node_modules/
 app/agents/web/dist/
+*.tsbuildinfo
