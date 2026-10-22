@@ -280,7 +280,7 @@ class Voice:
             archive.writestr("voice.json", json.dumps(self.to_json(), indent=2))
             archive.writestr(
                 "README.txt",
-                f"Dataset of the voice \"{self.name}\" ({self.language}), exported from Speech Model Toolkit.\n"
+                f"Dataset of the voice \"{self.name}\" ({self.language}), exported from SpeechModelToolkit.\n"
                 f"{len(lines)} clips. metadata.csv has one line per clip: id|transcript; the audio is wavs/<id>.wav.\n"
                 "This is the LJSpeech layout used by Piper and most TTS trainers. "
                 "Import it again under Voice -> Dataset -> Import file -> Already have a prepared dataset?\n",

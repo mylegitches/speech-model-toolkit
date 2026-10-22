@@ -1,4 +1,4 @@
-"""Speech Model Toolkit: wake word and Piper voice training in one web app.
+"""SpeechModelToolkit: wake word and Piper voice training in one web app.
 
   /            landing page with tabs (static/index.html)
   /api/status  combined status of both tools, polled by the landing page
@@ -48,7 +48,7 @@ async def lifespan(_app: FastAPI):
     await voice.startup()
     device = voice.trainer.device
     _LOGGER.info(
-        "Speech Model Toolkit ready. Voice training: %s",
+        "SpeechModelToolkit ready. Voice training: %s",
         (f"GPU {device['gpu']} ({device['memory_gb']} GB)" if device.get("gpu") else "CPU only")
         if device.get("ok") else f"NOT AVAILABLE ({device.get('problem', 'unknown')[:200]})",
     )
@@ -56,7 +56,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="Speech Model Toolkit", lifespan=lifespan, docs_url=None, redoc_url=None
+    title="SpeechModelToolkit", lifespan=lifespan, docs_url=None, redoc_url=None
 )
 
 
